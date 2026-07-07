@@ -36,7 +36,9 @@
         <summary>First launch shows a security warning? Here's how to open it</summary>
         <ul>
           <li><strong>Windows:</strong> <em>More info</em> → <em>Run anyway</em>.</li>
-          <li><strong>macOS:</strong> right-click the app → <em>Open</em> → <em>Open</em>.</li>
+          <li><strong>macOS:</strong> right-click the app → <em>Open</em> → <em>Open</em>. If it says
+            <em>"damaged and can't be opened"</em>, clear the download quarantine:
+            <code>xattr -dr com.apple.quarantine /Applications/Carino-PACS.app</code></li>
           <li><strong>Linux:</strong> easiest is the <code>.rpm</code> (Fedora/RHEL) or
             <code>.deb</code> (Debian/Ubuntu) from the
             <a href="https://github.com/MiguelCarino/Carino-PACS/releases" target="_blank" rel="noopener">releases</a>.

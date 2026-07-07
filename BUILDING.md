@@ -223,6 +223,18 @@ you cut a release they simply point at the Releases page — so publish a `v*` t
 > The page loads its own local `carino-navbar.js` + `carino-clock.js` (no CDN). If
 > you set a custom domain later, add a `docs/CNAME` file with the hostname.
 
+## macOS "damaged and can't be opened"
+
+This is Gatekeeper on an **unsigned** app that was downloaded (a quarantine
+attribute), not a real corruption. Clear it (recursive, on the installed `.app`):
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Carino-PACS.app
+```
+
+Right-click → **Open** → **Open** also works when macOS offers it. The permanent
+fix is signing + notarization (below) — then no quarantine prompt at all.
+
 ## Signing (optional — removes the "unknown developer" warnings)
 
 Builds are **unsigned by default**: they run, but the first launch shows a

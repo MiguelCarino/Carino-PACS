@@ -117,7 +117,9 @@ function startEngine() {
   if (logStream) logStream.write(`\n=== launch ${new Date().toISOString()} ===\n${cmd} ${args.join(" ")}\n`);
 
   try {
-    py = spawn(cmd, args, { cwd, env: process.env, windowsHide: true });
+    // Force UTF-8 stdio so Windows (cp1252) doesn't crash on chars like → … —.
+    const env = { ...process.env, PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1" };
+    py = spawn(cmd, args, { cwd, env, windowsHide: true });
   } catch (err) {
     showError("Failed to launch the engine:\n" + cmd + "\n\n" + err.message);
     return;

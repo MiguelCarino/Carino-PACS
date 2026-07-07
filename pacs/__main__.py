@@ -198,7 +198,19 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _force_utf8_output() -> None:
+    """Windows' default cp1252 stdout can't encode chars like → … — and crashes
+    the engine with UnicodeEncodeError. Force UTF-8 (and never crash on an
+    un-encodable char). No-op if the streams aren't reconfigurable."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
 def main(argv=None) -> int:
+    _force_utf8_output()
     args = build_parser().parse_args(argv)
     return args.func(args)
 
