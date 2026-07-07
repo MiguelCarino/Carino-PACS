@@ -52,4 +52,9 @@ if __name__ == "__main__":
     import os
     here = os.path.dirname(os.path.abspath(__file__))
     write_png(os.path.join(here, "tray.png"), 32)
-    write_png(os.path.join(here, "icon.png"), 512)  # electron-builder wants >=512
+    write_png(os.path.join(here, "icon.png"), 512)  # window/app icon (mac/win)
+    # A proper size set for Linux packaging (electron-builder linux.icon = a dir).
+    icons = os.path.join(here, "..", "build", "icons")
+    os.makedirs(icons, exist_ok=True)
+    for sz in (16, 24, 32, 48, 64, 128, 256, 512):
+        write_png(os.path.join(icons, "%dx%d.png" % (sz, sz)), sz)

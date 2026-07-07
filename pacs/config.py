@@ -1,9 +1,11 @@
 """Config load/save + defaults + light validation.
 
-The whole app is configured by one JSON file (default: ./config.json).  We
-merge it over a set of defaults so a partial/old config still boots, and we
-resolve the handful of path fields to absolute paths relative to the config
-file's own directory so relative paths behave predictably no matter the CWD.
+The whole app is configured by one JSON file. By default it lives in
+``~/CarinoPACS/config.json`` and the relative folder defaults (``./received``,
+``./outgoing``, ``./sent``, ``./logs``) therefore resolve to subfolders of
+``~/CarinoPACS`` — so a fresh install keeps everything together in one visible
+place in the user's home. Paths are resolved relative to the config file's own
+directory (with ``~`` expansion) so they behave predictably no matter the CWD.
 """
 
 from __future__ import annotations
@@ -12,6 +14,10 @@ import copy
 import json
 import os
 from typing import Any
+
+# Default home for config + data + logs: ~/CarinoPACS
+DEFAULT_DIR = os.path.join(os.path.expanduser("~"), "CarinoPACS")
+DEFAULT_CONFIG = os.path.join(DEFAULT_DIR, "config.json")
 
 DEFAULTS: dict[str, Any] = {
     "scp": {
@@ -39,6 +45,7 @@ DEFAULTS: dict[str, Any] = {
     },
     "destinations": [],
     "web": {"host": "127.0.0.1", "port": 8042},
+    "logs_dir": "./logs",       # dated log files (one per day) live here
 }
 
 _PATH_FIELDS = [("scp", "storage_dir"), ("scu", "watch_dir"), ("scu", "sent_dir")]
@@ -71,6 +78,7 @@ class Config:
         return self
 
     def save(self) -> None:
+        os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
         tmp = self.path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(self.data, fh, indent=2)
@@ -108,18 +116,24 @@ class Config:
     def enabled_destinations(self) -> list[dict]:
         return [d for d in self.destinations if d.get("enabled", True)]
 
+    @property
+    def logs_dir(self) -> str:
+        """Absolute path of the dated-log folder."""
+        return self.resolve_path(self.data.get("logs_dir", "./logs"))
+
     def resolved(self, section: str, field: str) -> str:
         """Absolute path for a path field, relative to the config file dir."""
-        base = os.path.dirname(self.path)
-        val = self.data[section][field]
-        return val if os.path.isabs(val) else os.path.normpath(os.path.join(base, val))
+        return self.resolve_path(self.data[section][field])
 
     def resolve_path(self, value: str) -> str:
-        """Absolute path for a possibly-relative file path; '' stays ''."""
+        """Absolute path for a possibly-relative file path ('~' expanded); '' stays ''."""
         if not value:
             return ""
+        value = os.path.expanduser(value)
+        if os.path.isabs(value):
+            return os.path.normpath(value)
         base = os.path.dirname(self.path)
-        return value if os.path.isabs(value) else os.path.normpath(os.path.join(base, value))
+        return os.path.normpath(os.path.join(base, value))
 
 
 def validate(data: dict) -> None:

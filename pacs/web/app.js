@@ -204,6 +204,43 @@
     finally { btn.disabled = false; pollStatus(); }
   }
 
+  /* ── Drag & drop a folder onto the Receiver / Auto-send cards ──── */
+  function droppedFolder(e) {
+    // In the desktop app, File.path gives the real absolute path (browsers hide it).
+    let isDir = true;
+    const items = e.dataTransfer.items;
+    if (items && items.length && items[0].webkitGetAsEntry) {
+      const entry = items[0].webkitGetAsEntry();
+      if (entry) isDir = entry.isDirectory;
+    }
+    const f = e.dataTransfer.files && e.dataTransfer.files[0];
+    return { path: f && f.path, isDir: isDir };
+  }
+
+  function wireDropZones() {
+    // Stop the browser from navigating if a folder is dropped anywhere.
+    ["dragover", "drop"].forEach((ev) => window.addEventListener(ev, (e) => e.preventDefault()));
+    const zones = [
+      { el: $("receiverCard"), input: "scpDir", label: "Storage" },
+      { el: $("watcherCard"), input: "scuDir", label: "Watched" },
+    ];
+    zones.forEach((z) => {
+      if (!z.el) return;
+      z.el.addEventListener("dragover", (e) => { e.preventDefault(); z.el.classList.add("drop-active"); });
+      z.el.addEventListener("dragleave", (e) => { if (!z.el.contains(e.relatedTarget)) z.el.classList.remove("drop-active"); });
+      z.el.addEventListener("drop", async (e) => {
+        e.preventDefault();
+        z.el.classList.remove("drop-active");
+        const info = droppedFolder(e);
+        if (!info.path) { flashNote("Folder drop needs the desktop app (browsers hide the path).", false); return; }
+        if (info.isDir === false) { flashNote("Please drop a folder, not a file.", false); return; }
+        $(z.input).value = info.path;
+        await saveConfig();
+        flashNote(z.label + " folder → " + info.path, true);
+      });
+    });
+  }
+
   /* ── Wire up ─────────────────────────────────────────────────── */
   document.addEventListener("DOMContentLoaded", () => {
     $("rxToggle").addEventListener("click", (e) => toggle("receiver", e.target));
@@ -211,6 +248,7 @@
     $("addDest").addEventListener("click", () => addDestRow({ enabled: true }));
     $("saveCfg").addEventListener("click", saveConfig);
     $("clearLog").addEventListener("click", () => { $("log").innerHTML = ""; });
+    wireDropZones();
 
     loadConfig().catch((e) => flashNote("Load failed: " + e.message, false));
     pollStatus();

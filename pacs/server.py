@@ -17,7 +17,7 @@ from .watcher import FolderWatcher
 class PacsServer:
     def __init__(self, cfg: Config):
         self.cfg = cfg
-        self.log = LogBuffer()
+        self.log = LogBuffer(log_dir=cfg.logs_dir)
         self._lock = threading.Lock()
         self.scp: Optional[StorageSCP] = None
         self.watcher = FolderWatcher(cfg, self.log)
@@ -96,6 +96,7 @@ class PacsServer:
         was_receiving = bool(self.scp and self.scp.running)
         self.stop_receiver()
         self.cfg.replace(new_data)
+        self.log.log_dir = self.cfg.logs_dir   # logs_dir may have changed
         if was_receiving:
             self.start_receiver()
         self.log.info("Configuration updated", kind="config")
@@ -126,6 +127,7 @@ class PacsServer:
             },
             "destinations": self.cfg.destinations,
             "config_path": self.cfg.path,
+            "logs_dir": self.cfg.logs_dir,
         }
 
     def shutdown(self) -> None:

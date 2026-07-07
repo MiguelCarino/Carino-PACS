@@ -156,11 +156,19 @@ All commands accept `-c / --config <path>` (default `config.json`).
   "destinations": [
     { "name": "Remote PACS", "host": "10.0.0.5", "port": 104, "aet": "REMOTEPACS", "enabled": true, "tls": false }
   ],
-  "web": { "host": "127.0.0.1", "port": 8042 }
+  "web": { "host": "127.0.0.1", "port": 8042 },
+  "logs_dir": "./logs"         // dated log files (one per day) live here
 }
 ```
 
-Relative paths are resolved against the config file's own directory.
+By default everything lives in **`~/CarinoPACS/`** — the config file, the
+`received` / `outgoing` / `sent` folders, and the `logs` folder (one
+`YYYY-MM-DD.log` per day). Relative paths are resolved against the config file's
+own directory and `~` is expanded, so the defaults land there automatically; set
+absolute paths to put them elsewhere.
+
+In the desktop app / dashboard you can also **drag a folder from your file
+manager onto the Receiver or Auto-send card** to set its location.
 
 ---
 

@@ -17,7 +17,7 @@ import sys
 import time
 
 from . import APP_NAME, __version__
-from .config import Config
+from .config import Config, DEFAULT_CONFIG
 from .scu import Destination
 from .server import PacsServer
 
@@ -48,7 +48,8 @@ def _block_until_signal(server: PacsServer) -> None:
 
 
 def cmd_init(args) -> int:
-    cfg_path = os.path.abspath(args.config)
+    cfg_path = os.path.abspath(os.path.expanduser(args.config))
+    os.makedirs(os.path.dirname(cfg_path) or ".", exist_ok=True)
     if os.path.exists(cfg_path):
         print(f"{cfg_path} already exists — leaving it untouched.")
     else:
@@ -63,6 +64,8 @@ def cmd_init(args) -> int:
         d = cfg.resolved(section, field)
         os.makedirs(d, exist_ok=True)
         print(f"  ensured {d}")
+    os.makedirs(cfg.logs_dir, exist_ok=True)
+    print(f"  ensured {cfg.logs_dir}")
     return 0
 
 
@@ -160,7 +163,8 @@ def cmd_echo(args) -> int:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="pacs", description=f"{APP_NAME} — simple DICOM store PACS")
     p.add_argument("--version", action="version", version=f"{APP_NAME} {__version__}")
-    p.add_argument("-c", "--config", default="config.json", help="path to config JSON (default: config.json)")
+    p.add_argument("-c", "--config", default=DEFAULT_CONFIG,
+                   help=f"path to config JSON (default: {DEFAULT_CONFIG})")
     sub = p.add_subparsers(dest="command", required=True)
 
     s = sub.add_parser("serve", help="run the web dashboard")

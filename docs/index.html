@@ -37,7 +37,12 @@
         <ul>
           <li><strong>Windows:</strong> <em>More info</em> → <em>Run anyway</em>.</li>
           <li><strong>macOS:</strong> right-click the app → <em>Open</em> → <em>Open</em>.</li>
-          <li><strong>Linux:</strong> mark it executable (<code>chmod +x</code>) and run it.</li>
+          <li><strong>Linux:</strong> easiest is the <code>.rpm</code> (Fedora/RHEL) or
+            <code>.deb</code> (Debian/Ubuntu) from the
+            <a href="https://github.com/MiguelCarino/Carino-PACS/releases" target="_blank" rel="noopener">releases</a>.
+            The <code>.AppImage</code> needs FUSE — <code>sudo dnf install fuse-libs</code>
+            (Fedora) / <code>sudo apt install libfuse2</code> (Debian), or run it with
+            <code>--appimage-extract-and-run</code>.</li>
         </ul>
         <p>The warning appears because the app isn't code-signed yet — it's safe.</p>
       </details>

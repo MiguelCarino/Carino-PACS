@@ -3,7 +3,8 @@
   "productName": "Carino PACS",
   "version": "1.0.0",
   "description": "Tray agent + desktop window for the Carino PACS DICOM store server",
-  "author": "Carino Systems",
+  "author": { "name": "Carino Systems", "email": "hello@carino.systems" },
+  "homepage": "https://github.com/MiguelCarino/Carino-PACS",
   "license": "MIT",
   "main": "main.js",
   "scripts": {
@@ -17,8 +18,9 @@
   },
   "build": {
     "appId": "systems.carino.pacs",
-    "productName": "Carino PACS",
+    "productName": "Carino-PACS",
     "afterSign": "build/notarize.js",
+    "beforeBuild": "build/before-build.js",
     "files": ["main.js", "assets/**/*"],
     "extraResources": [
       { "from": "engine", "to": "engine" }
@@ -37,9 +39,13 @@
       "icon": "assets/icon.png"
     },
     "linux": {
-      "target": ["AppImage"],
+      "target": ["AppImage", "rpm", "deb"],
       "category": "Utility",
-      "icon": "assets/icon.png"
+      "maintainer": "Carino Systems <hello@carino.systems>",
+      "synopsis": "Simple DICOM store PACS — receive and auto-forward medical images",
+      "icon": "build/icons",
+      "executableName": "carino-pacs",
+      "desktop": { "Name": "Carino PACS" }
     }
   }
 }

@@ -13,7 +13,7 @@
   },
   "scu": {
     "aet": "CARINOSCU",
-    "watch_dir": "./outgoing",
+    "watch_dir": "/home/carino/Downloads/Estudio_FLORINDA PALACIO CONTRERA_CT_mgAycj/IMAGENES/",
     "poll_interval": 3,
     "on_success": "keep",
     "sent_dir": "./sent",
@@ -24,17 +24,16 @@
   },
   "destinations": [
     {
+      "enabled": false,
       "name": "Example PACS",
       "host": "127.0.0.1",
       "port": 104,
       "aet": "REMOTEPACS",
-      "enabled": false,
       "tls": false
     }
   ],
   "web": {
     "host": "127.0.0.1",
     "port": 8042
-  },
-  "logs_dir": "./logs"
+  }
 }

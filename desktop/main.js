@@ -16,9 +16,11 @@ const { spawn } = require("child_process");
 const http = require("http");
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
 
 const ROOT = path.join(__dirname, "..");            // the Carino PACS repo root
 const ASSETS = path.join(__dirname, "assets");
+const DATA_DIR = path.join(os.homedir(), "CarinoPACS");   // config + data + logs live here
 
 let tray = null;
 let win = null;
@@ -29,9 +31,8 @@ let serverUrl = "http://127.0.0.1:8042/";
 // Config + data (received/outgoing/sent) live in a writable dir: the OS
 // per-user data dir in a packaged app, the repo root in dev.
 function configPath() {
-  return app.isPackaged
-    ? path.join(app.getPath("userData"), "config.json")
-    : path.join(ROOT, "config.json");
+  // Config + data + logs live in ~/CarinoPACS for both dev and packaged builds.
+  return path.join(DATA_DIR, "config.json");
 }
 
 function webConfig() {
@@ -55,13 +56,13 @@ function engineCommand(host, port) {
   if (app.isPackaged) {
     const bin = path.join(process.resourcesPath, "engine", "pacs-engine",
       isWin ? "pacs-engine.exe" : "pacs-engine");
-    return { cmd: bin, args: common, cwd: app.getPath("userData") };
+    return { cmd: bin, args: common, cwd: DATA_DIR };
   }
   const venv = isWin
     ? path.join(ROOT, ".venv", "Scripts", "python.exe")
     : path.join(ROOT, ".venv", "bin", "python");
   const py = fs.existsSync(venv) ? venv : (isWin ? "python" : "python3");
-  return { cmd: py, args: ["-m", "pacs", ...common], cwd: ROOT };
+  return { cmd: py, args: ["-m", "pacs", ...common], cwd: DATA_DIR };
 }
 
 function startEngine() {
@@ -113,6 +114,7 @@ function createWindow() {
     title: "Carino PACS",
     icon: path.join(ASSETS, "icon.png"),
     backgroundColor: "#050505",
+    autoHideMenuBar: true,       // no menu bar (Alt won't reveal it either)
     webPreferences: { contextIsolation: true, nodeIntegration: false },
   });
   win.loadURL(serverUrl);
@@ -170,6 +172,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on("second-instance", showWindow);   // re-launch focuses the existing agent
 
   app.whenReady().then(async () => {
+    Menu.setApplicationMenu(null);   // remove the default app/menu bar entirely
     startEngine();
     createTray();
     const up = await waitForServer();

@@ -28,7 +28,12 @@ body {
   background: linear-gradient(180deg, var(--panel), #080808);
   border: 1px solid var(--border); border-radius: 14px;
 }
-.card { padding: 18px 20px; }
+.card { padding: 18px 20px; position: relative; }
+.drop-hint { margin-top: 10px; font-family: var(--mono); font-size: .6rem; color: #555; text-align: center; opacity: 0; transition: opacity .15s; pointer-events: none; }
+.card:hover .drop-hint { opacity: .7; }
+.card.drop-active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent), 0 0 30px rgba(234,179,8,.22); }
+.card.drop-active .drop-hint { opacity: 1; color: var(--accent); }
+.card.drop-active * { pointer-events: none; }  /* let the drop land on the card, not children */
 .card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
 .card-title { font-weight: 700; font-size: 1.05rem; display: flex; align-items: center; gap: 10px; }
 .card-title small { color: var(--muted); font-weight: 500; font-size: .72rem; text-transform: uppercase; letter-spacing: .1em; }

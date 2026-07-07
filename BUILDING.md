@@ -70,9 +70,24 @@ Output appears in **`desktop/dist/`**:
 
 | You built on… | You get |
 |---|---|
-| Linux   | `Carino PACS-1.0.0.AppImage` |
-| macOS   | `Carino PACS-1.0.0.dmg` (+ `.zip`) |
-| Windows | `Carino PACS Setup 1.0.0.exe` |
+| Linux   | `.AppImage` **+ `.rpm` + `.deb`** |
+| macOS   | `.dmg` (+ `.zip`) |
+| Windows | `Setup .exe` (NSIS) |
+
+> **Linux tip:** prefer the `.rpm`/`.deb` — they install natively and avoid the
+> AppImage FUSE requirement. The `.AppImage` needs `libfuse.so.2`
+> (`sudo dnf install fuse-libs` on Fedora, `sudo apt install libfuse2` on Debian),
+> or run it once with `--appimage-extract-and-run`. Building the `.rpm` locally
+> needs `rpmbuild` (Fedora has it; on Debian/Ubuntu `sudo apt install rpm`); the
+> `.deb` needs `dpkg`+`fakeroot` (present on Debian/Ubuntu; on Fedora
+> `sudo dnf install dpkg fakeroot`). Also on **Fedora**, electron-builder's bundled
+> `fpm` links an old Ruby against `libcrypt.so.1` — install it with
+> `sudo dnf install libxcrypt-compat`. The CI workflow installs whatever its runner needs.
+
+**Always freeze the engine before packaging** (`python -m PyInstaller …`). A
+`beforeBuild` guard now aborts the build with a reminder if `desktop/engine/` is
+missing — otherwise the installer would ship without the DICOM engine and silently
+fail to start.
 
 In a packaged build the engine is the frozen `pacs-engine` binary inside the
 app, and its config + received/outgoing/sent folders live in the per-user data
