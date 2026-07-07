@@ -21,7 +21,7 @@
     "productName": "Carino-PACS",
     "afterSign": "build/notarize.js",
     "beforeBuild": "build/before-build.js",
-    "files": ["main.js", "assets/**/*"],
+    "files": ["main.js", "loading.html", "assets/**/*"],
     "extraResources": [
       { "from": "engine", "to": "engine" }
     ],

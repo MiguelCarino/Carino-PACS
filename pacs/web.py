@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
+import time
 
 from flask import Flask, jsonify, request, send_from_directory
 
@@ -97,5 +99,18 @@ def create_app(server: PacsServer) -> Flask:
         except ValueError:
             since = 0
         return jsonify(last_seq=server.log.last_seq, entries=server.log.since(since))
+
+    @app.post("/api/shutdown")
+    def api_shutdown():
+        """Stop the workers and terminate the whole engine process."""
+        server.log.info("Shutdown requested from dashboard", kind="config")
+        server.shutdown()
+
+        def _exit():
+            time.sleep(0.3)   # let this HTTP response flush first
+            os._exit(0)
+
+        threading.Thread(target=_exit, daemon=True).start()
+        return jsonify(ok=True, message="Carino PACS is shutting down")
 
     return app

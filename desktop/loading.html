@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Carino PACS</title>
+  <style>
+    html, body { height: 100%; margin: 0; }
+    body { display: flex; align-items: center; justify-content: center; flex-direction: column;
+      background: #050505; color: #f5f5f5;
+      font-family: "IBM Plex Sans", system-ui, -apple-system, sans-serif; }
+    .ring { width: 44px; height: 44px; border-radius: 50%;
+      border: 3px solid #262626; border-top-color: #eab308; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    h1 { font-weight: 800; font-size: 1.4rem; margin: 22px 0 6px;
+      background: linear-gradient(130deg, #fef08a 0%, #eab308 50%, #b45309 100%);
+      -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+    p { color: #8a8a8a; font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: .8rem; margin: 0; }
+  </style>
+</head>
+<body>
+  <div class="ring"></div>
+  <h1>Carino PACS</h1>
+  <p>Starting the DICOM engine…</p>
+</body>
+</html>

@@ -158,3 +158,14 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
   box-shadow: 0 12px 34px rgba(0,0,0,.55); max-width: 92vw; }
 .toast.ok { border-color: var(--ok); color: var(--ok); }
 .toast.bad { border-color: var(--bad); color: var(--bad); }
+
+/* Shut-down (kill service) button */
+.btn.kill { background: transparent; color: var(--bad); border-color: var(--bad); margin-right: auto; }
+.btn.kill:hover { background: var(--bad); color: #fff; filter: none; transform: translateY(-1px); }
+
+/* Full-screen notice after the service is shut down */
+.stopped-overlay { position: fixed; inset: 0; z-index: 2147483647; display: flex;
+  align-items: center; justify-content: center; text-align: center;
+  background: rgba(5,5,5,.92); backdrop-filter: blur(3px); padding: 24px; }
+.stopped-overlay h2 { margin: 0 0 10px; color: var(--accent); }
+.stopped-overlay p { margin: 0; color: var(--muted); max-width: 420px; }

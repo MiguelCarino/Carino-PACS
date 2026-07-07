@@ -172,6 +172,28 @@ that's a small addition to the workflow — ask and it'll be wired in.
 
 ---
 
+## Reset to a clean slate (for testing)
+
+To rule out stale config/data/build artifacts messing with a test, wipe everything
+and rebuild from zero:
+
+```bash
+./reset.sh            # prompts first; ./reset.sh -y to skip
+```
+
+It deletes (source is **not** touched): `~/CarinoPACS/` (config + received/outgoing/
+sent/logs + state), `.venv/`, repo-root `build/` (PyInstaller workpath),
+`desktop/{node_modules,dist,engine}`, `__pycache__/`, and any stray Electron
+`userData` from older builds (`~/.config/Carino*PACS*`). Then it prints the
+rebuild commands. In the dashboard, hard-refresh (**Ctrl+Shift+R**) to drop cached JS/CSS.
+
+## Stopping / killing the service
+
+- **Dashboard:** Settings popup → **⏻ Shut down service** (stops the receiver +
+  auto-send and exits the engine process; `POST /api/shutdown`).
+- **Desktop app:** tray menu → **Quit** (also kills the engine).
+- **Headless:** `Ctrl+C`, or `curl -X POST http://127.0.0.1:8042/api/shutdown`.
+
 ## Website (GitHub Pages)
 
 The `docs/` folder is a ready-to-publish landing page (Carino navbar, plain-language

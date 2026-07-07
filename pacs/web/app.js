@@ -14,6 +14,7 @@
     api(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data || {}) });
 
   let loadedWeb = { host: "127.0.0.1", port: 8042 }; // preserved across saves
+  let statusTimer = null, logTimer = null;
 
   /* ── Status polling ──────────────────────────────────────────── */
   function renderStatus(s) {
@@ -210,7 +211,8 @@
       await post("/api/config", collectConfig());
       flashNote("Saved.", true);
       pollStatus();
-    } catch (e) { flashNote(e.message, false); }
+      return true;
+    } catch (e) { flashNote(e.message, false); return false; }
   }
 
   async function toggle(kind, btn) {
@@ -261,13 +263,31 @@
     });
   }
 
+  /* ── Kill the whole service ──────────────────────────────────── */
+  async function killService() {
+    if (!confirm("Shut down Carino PACS?\n\nThe receiver and auto-send stop and the engine process exits.")) return;
+    $("killSvc").disabled = true;
+    post("/api/shutdown", {}).catch(() => {});   // process may exit before responding
+    if (statusTimer) clearInterval(statusTimer);
+    if (logTimer) clearInterval(logTimer);
+    setDot($("rxDot"), false);
+    setDot($("wxDot"), false);
+    document.querySelectorAll(".modal").forEach((d) => { if (d.open) d.close(); });
+    const ov = document.createElement("div");
+    ov.className = "stopped-overlay";
+    ov.innerHTML = "<div><h2>Carino PACS has shut down</h2>" +
+      "<p>The service stopped. You can close this window, or restart it from your terminal / the desktop app.</p></div>";
+    document.body.appendChild(ov);
+  }
+
   /* ── Wire up ─────────────────────────────────────────────────── */
   document.addEventListener("DOMContentLoaded", () => {
+    $("killSvc").addEventListener("click", killService);
     $("rxToggle").addEventListener("click", (e) => toggle("receiver", e.target));
     $("wxToggle").addEventListener("click", (e) => toggle("watcher", e.target));
     $("addDest").addEventListener("click", () => addDestRow({ enabled: true }));
-    $("saveCfg").addEventListener("click", saveConfig);
-    $("saveDests").addEventListener("click", saveConfig);
+    $("saveCfg").addEventListener("click", () => saveConfig().then((ok) => { if (ok) $("dlgSettings").close(); }));
+    $("saveDests").addEventListener("click", () => saveConfig().then((ok) => { if (ok) $("dlgDests").close(); }));
     $("clearLog").addEventListener("click", () => { $("log").innerHTML = ""; });
     wireDropZones();
 
@@ -283,7 +303,7 @@
     loadConfig().catch((e) => flashNote("Load failed: " + e.message, false));
     pollStatus();
     pollLog();
-    setInterval(pollStatus, 2000);
-    setInterval(pollLog, 1500);
+    statusTimer = setInterval(pollStatus, 2000);
+    logTimer = setInterval(pollLog, 1500);
   });
 })();
