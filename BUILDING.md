@@ -55,15 +55,24 @@ cannot build a Windows `.exe` on Linux — see [why](#why-one-os-at-a-time)).
 
 Prerequisites on the build machine: **Python 3.8+** and **Node 18+**.
 
+> ⚠️ **Freeze with the venv that has the project deps** (`pydicom`, `pynetdicom`,
+> `flask`). If you freeze with a bare Python, the app starts then crashes with
+> `ModuleNotFoundError: No module named 'pydicom'`. The spec now aborts loudly if
+> the deps are missing. If you copied the repo elsewhere, its `.venv` is broken
+> (absolute paths) — delete it and re-run `./setup.sh` in that copy.
+
 ```bash
-# from the repo root — freeze the Python engine into a single binary
-python -m pip install pyinstaller
-python -m PyInstaller packaging/pacs-engine.spec --distpath desktop/engine --workpath build/pyi
+# from the repo root
+rm -rf .venv                                  # drop any stale/copied venv
+./setup.sh                                    # fresh .venv WITH deps  (Windows: .\setup.ps1)
+./.venv/bin/pip install pyinstaller           # Windows: .\.venv\Scripts\pip install pyinstaller
+
+# freeze the engine using THAT venv's python
+./.venv/bin/python -m PyInstaller packaging/pacs-engine.spec --distpath desktop/engine --workpath build/pyi
+#   Windows: .\.venv\Scripts\python -m PyInstaller packaging/pacs-engine.spec --distpath desktop/engine --workpath build/pyi
 
 # then build the OS-native installer
-cd desktop
-npm install
-npm run dist
+cd desktop && npm install && npm run dist
 ```
 
 Output appears in **`desktop/dist/`**:
@@ -74,15 +83,18 @@ Output appears in **`desktop/dist/`**:
 | macOS   | `.dmg` (+ `.zip`) |
 | Windows | `Setup .exe` (NSIS) |
 
-> **Linux tip:** prefer the `.rpm`/`.deb` — they install natively and avoid the
-> AppImage FUSE requirement. The `.AppImage` needs `libfuse.so.2`
-> (`sudo dnf install fuse-libs` on Fedora, `sudo apt install libfuse2` on Debian),
-> or run it once with `--appimage-extract-and-run`. Building the `.rpm` locally
-> needs `rpmbuild` (Fedora has it; on Debian/Ubuntu `sudo apt install rpm`); the
-> `.deb` needs `dpkg`+`fakeroot` (present on Debian/Ubuntu; on Fedora
-> `sudo dnf install dpkg fakeroot`). Also on **Fedora**, electron-builder's bundled
-> `fpm` links an old Ruby against `libcrypt.so.1` — install it with
-> `sudo dnf install libxcrypt-compat`. The CI workflow installs whatever its runner needs.
+> **No `.rpm`/`.deb`?** electron-builder skips (or errors on) a target whose tools
+> aren't installed. Install them once, then re-run `npm run dist`:
+> ```bash
+> # Fedora — build .rpm and .deb:
+> sudo dnf install rpm-build libxcrypt-compat dpkg fakeroot fuse-libs
+> # Debian/Ubuntu:
+> sudo apt install rpm fakeroot libfuse2
+> ```
+> `rpm-build`+`libxcrypt-compat` → `.rpm`; `dpkg`+`fakeroot` → `.deb`; `fuse-libs`/
+> `libfuse2` lets the resulting `.AppImage` run (or use `--appimage-extract-and-run`).
+> To build just one, e.g.: `npx electron-builder --linux rpm`. The CI workflow
+> installs whatever its runner needs.
 
 **Always freeze the engine before packaging** (`python -m PyInstaller …`). A
 `beforeBuild` guard now aborts the build with a reminder if `desktop/engine/` is
