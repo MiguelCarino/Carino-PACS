@@ -54,17 +54,31 @@ jobs:
         working-directory: desktop
         run: npm install
 
-      - name: Build installers (electron-builder)
-        working-directory: desktop
-        run: npx --no-install electron-builder --publish never
+      # Only export the signing vars when the secret actually has a value.
+      # An EMPTY CSC_LINK makes electron-builder try to sign with an empty cert
+      # path (→ "desktop not a file") on macOS/Windows. Absent (not exported) =
+      # unsigned build, which succeeds. Secrets are read via env, not inlined in
+      # the script, so they can't leak/inject.
+      - name: Configure code signing (only when secrets are set)
+        shell: bash
         env:
-          # Present → signed; absent/empty → unsigned. electron-builder + the
-          # afterSign notarize hook both skip gracefully when unset.
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          for v in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            val="${!v}"
+            if [ -n "$val" ]; then
+              { echo "$v<<__EOF__"; printf '%s\n' "$val"; echo "__EOF__"; } >> "$GITHUB_ENV"
+              echo "signing: $v is set"
+            fi
+          done
+
+      - name: Build installers (electron-builder)
+        working-directory: desktop
+        run: npx --no-install electron-builder --publish never
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
