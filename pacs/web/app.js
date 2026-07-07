@@ -18,7 +18,7 @@
   /* ── Status polling ──────────────────────────────────────────── */
   function renderStatus(s) {
     const rx = s.receiver, wx = s.watcher;
-    $("rxDot").className = "dot " + (rx.running ? "on" : "off");
+    setDot($("rxDot"), rx.running);
     $("rxAet").textContent = rx.aet;
     $("rxAddr").textContent = `${rx.bind}:${rx.port}`;
     $("rxDir").textContent = rx.storage_dir;
@@ -27,7 +27,7 @@
     $("rxTls").textContent = rx.tls ? (rx.tls_mutual ? "TLS (mutual)" : "TLS") : "plaintext";
     setToggle($("rxToggle"), rx.running);
 
-    $("wxDot").className = "dot " + (wx.running ? "on" : "off");
+    setDot($("wxDot"), wx.running);
     $("wxDir").textContent = wx.watch_dir;
     $("wxAet").textContent = wx.aet;
     $("wxMode").textContent = wx.on_success;
@@ -40,19 +40,33 @@
     btn.dataset.on = String(on);
     btn.textContent = on ? "Stop" : "Start";
   }
+  function setDot(el, on) {
+    el.classList.toggle("on", on);
+    el.classList.toggle("off", !on);
+  }
+  // Amber activity blink (like an ethernet link/activity LED); only while running.
+  function blink(el) {
+    if (!el || !el.classList.contains("on")) return;
+    el.classList.remove("act");
+    void el.offsetWidth;              // restart the CSS animation
+    el.classList.add("act");
+  }
   async function pollStatus() {
     try { renderStatus(await api("/api/status")); } catch (e) { /* keep last */ }
   }
 
   /* ── Log polling ─────────────────────────────────────────────── */
-  let logSeq = 0;
+  let logSeq = 0, firstLog = true;
   async function pollLog() {
     try {
       const data = await api("/api/log?since=" + logSeq);
       const box = $("log");
       const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 20;
+      let sawStore = false, sawSend = false;
       for (const e of data.entries) {
         logSeq = e.seq;
+        if (e.kind === "store") sawStore = true;   // a file was received
+        if (e.kind === "send") sawSend = true;      // a file was forwarded
         const line = document.createElement("div");
         line.className = "line";
         const t = document.createElement("span");
@@ -66,6 +80,11 @@
       }
       while (box.childElementCount > 400) box.removeChild(box.firstChild);
       if (atBottom) box.scrollTop = box.scrollHeight;
+      if (!firstLog) {                 // don't blink for the backlog on first load
+        if (sawStore) blink($("rxDot"));
+        if (sawSend) blink($("wxDot"));
+      }
+      firstLog = false;
     } catch (e) { /* ignore */ }
   }
 
@@ -178,11 +197,12 @@
   }
 
   function flashNote(msg, ok) {
-    const n = $("saveNote");
-    n.textContent = msg;
-    n.className = "save-note " + (ok ? "ok" : "bad");
+    const t = $("toast");
+    t.textContent = msg;
+    t.className = "toast " + (ok ? "ok" : "bad");
+    t.hidden = false;
     clearTimeout(flashNote._t);
-    flashNote._t = setTimeout(() => { n.textContent = ""; n.className = "save-note"; }, 6000);
+    flashNote._t = setTimeout(() => { t.hidden = true; }, 5000);
   }
 
   async function saveConfig() {
@@ -247,8 +267,18 @@
     $("wxToggle").addEventListener("click", (e) => toggle("watcher", e.target));
     $("addDest").addEventListener("click", () => addDestRow({ enabled: true }));
     $("saveCfg").addEventListener("click", saveConfig);
+    $("saveDests").addEventListener("click", saveConfig);
     $("clearLog").addEventListener("click", () => { $("log").innerHTML = ""; });
     wireDropZones();
+
+    // Popup windows: three buttons → native <dialog> modals.
+    const openMap = { openSettings: "dlgSettings", openDests: "dlgDests", openLogs: "dlgLogs" };
+    Object.keys(openMap).forEach((b) =>
+      $(b).addEventListener("click", () => { const d = $(openMap[b]); if (d && !d.open) d.showModal(); }));
+    document.querySelectorAll(".modal").forEach((dlg) => {
+      dlg.querySelectorAll("[data-close]").forEach((x) => x.addEventListener("click", () => dlg.close()));
+      dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });  // click backdrop to close
+    });
 
     loadConfig().catch((e) => flashNote("Load failed: " + e.message, false));
     pollStatus();
