@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Carino PACS</title>
+  <meta name="description" content="A deliberately simple, free tool that sits in your tray and receives DICOM medical images or auto-forwards a folder to other systems. Windows, macOS and Linux. Not an enterprise PACS." />
+  <link rel="icon" href="favicon.webp" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Carino navbar self-injects at the top of <body> (loads carino-clock.js locally) -->
+  <script src="carino-navbar.js" data-app="PACS" defer></script>
+
+  <!-- ── Hero + downloads (above the fold) ────────────────────────── -->
+  <header class="hero">
+    <div class="wrap">
+      <div class="badge">Your PACS systems are down? Urgents patients cannot wait.</div>
+      <h1>Send &amp; receive medical images,<br><span class="gold">without the headache.</span></h1>
+      <p class="lede">
+        <strong>Carino PACS</strong> quietly receives <abbr title="the standard format for medical images from scanners — X-ray, CT, MRI, ultrasound…">DICOM</abbr>
+        images and auto-forwards them where you need them. It does two things well —
+        it's <em>not</em> an enterprise PACS, and that's the point. Download and go.
+      </p>
+
+      <div class="downloads" id="downloads">
+        <a class="dl-btn" data-os="windows" href="#" target="_blank" rel="noopener">
+          <span class="rec">recommended</span><b>🪟 Windows</b><span class="fmt">.exe</span></a>
+        <a class="dl-btn" data-os="macos" href="#" target="_blank" rel="noopener">
+          <span class="rec">recommended</span><b> macOS</b><span class="fmt">.dmg</span></a>
+        <a class="dl-btn" data-os="linux" href="#" target="_blank" rel="noopener">
+          <span class="rec">recommended</span><b>🐧 Linux</b><span class="fmt">.AppImage</span></a>
+      </div>
+      <p class="version" id="version">Checking for the latest version…</p>
+      <details class="firstrun">
+        <summary>First launch shows a security warning? Here's how to open it</summary>
+        <ul>
+          <li><strong>Windows:</strong> <em>More info</em> → <em>Run anyway</em>.</li>
+          <li><strong>macOS:</strong> right-click the app → <em>Open</em> → <em>Open</em>.</li>
+          <li><strong>Linux:</strong> mark it executable (<code>chmod +x</code>) and run it.</li>
+        </ul>
+        <p>The warning appears because the app isn't code-signed yet — it's safe.</p>
+      </details>
+    </div>
+  </header>
+
+  <!-- ── What + how, compact ──────────────────────────────────────── -->
+  <section class="section">
+    <div class="wrap grid2">
+      <div>
+        <h2>Two jobs. That's it.</h2>
+        <ul class="plain">
+          <li><b>📥 Receives</b> — machines and scanners send images to your computer;
+            it files them into tidy folders by patient and study.</li>
+          <li><b>📤 Forwards</b> — watches a folder and automatically sends new images
+            on to the systems you pick, retrying until each one has it.</li>
+        </ul>
+      </div>
+      <div>
+        <h2>Up and running in 3 steps</h2>
+        <ol class="steps">
+          <li><span class="n">1</span> Open it — it tucks into your system tray and keeps running.</li>
+          <li><span class="n">2</span> Click the tray icon — a simple dashboard opens.</li>
+          <li><span class="n">3</span> Pick a folder, add where to send. Done.</li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── For technical users (collapsed) ──────────────────────────── -->
+  <section class="section alt">
+    <div class="wrap">
+      <details class="techbox">
+        <summary><b>For technical users</b> — DICOM details, CLI &amp; source</summary>
+        <div class="tech-body">
+          <p>A store-only PACS built on <code>pynetdicom</code>/<code>pydicom</code>; the
+            desktop app is an Electron tray shell around the same engine.</p>
+          <ul class="tech-list">
+            <li><b>Storage SCP</b> — C-STORE + C-ECHO, files by Patient/Study/Series, all
+              transfer syntaxes (compressed stored as-is).</li>
+            <li><b>Storage SCU</b> — folder-watch auto-forward to N nodes, per-destination
+              retry, keep/move/delete on success.</li>
+            <li><b>DICOM-TLS</b> both sides (optional), incl. mutual TLS.</li>
+            <li>Web dashboard, headless CLI (<code>pacs serve|receive|send|echo</code>), or tray app.
+              DICOM port <code>11112</code>; dashboard <code>127.0.0.1:8042</code>.</li>
+          </ul>
+          <pre><code>git clone https://github.com/MiguelCarino/Carino-PACS
+cd Carino-PACS &amp;&amp; ./setup.sh      # Windows: .\setup.ps1
+./run.sh serve                   # dashboard → http://127.0.0.1:8042</code></pre>
+          <div class="tech-links">
+            <a class="btn ghost" href="https://github.com/MiguelCarino/Carino-PACS" target="_blank" rel="noopener">GitHub</a>
+            <a class="btn ghost" href="https://github.com/MiguelCarino/Carino-PACS/blob/main/README.md" target="_blank" rel="noopener">README</a>
+            <a class="btn ghost" href="https://github.com/MiguelCarino/Carino-PACS/blob/main/BUILDING.md" target="_blank" rel="noopener">Build &amp; release</a>
+          </div>
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <footer class="foot" style="text-align: center;">
+    <div>
+      <span class="disclaimer" style="color: rgb(185, 36, 36);">Deliberately simple, not an enterprise PACS. Not a medical device — use TLS and restrict access before touching real patient data.</span>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

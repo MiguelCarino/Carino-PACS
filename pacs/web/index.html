@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Carino PACS — DICOM store server</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Carino navbar self-injects at the top of <body> -->
+  <script src="carino-navbar.js" data-app="PACS" defer></script>
+
+  <main class="wrap">
+    <!-- ── Live status: receiver + auto-send ─────────────────────────── -->
+    <section class="cards">
+      <article class="card" id="receiverCard">
+        <header class="card-head">
+          <div class="card-title"><span class="dot" id="rxDot"></span> Receiver <small>Storage SCP</small></div>
+          <button class="btn toggle" id="rxToggle" data-on="false">Start</button>
+        </header>
+        <dl class="kv">
+          <div><dt>AE title</dt><dd id="rxAet">—</dd></div>
+          <div><dt>Listening</dt><dd id="rxAddr">—</dd></div>
+          <div><dt>Store to</dt><dd id="rxDir" class="path">—</dd></div>
+          <div><dt>Received</dt><dd id="rxCount">0</dd></div>
+          <div><dt>Errors</dt><dd id="rxErr">0</dd></div>
+          <div><dt>Security</dt><dd id="rxTls">—</dd></div>
+        </dl>
+      </article>
+
+      <article class="card" id="watcherCard">
+        <header class="card-head">
+          <div class="card-title"><span class="dot" id="wxDot"></span> Auto-send <small>folder watcher</small></div>
+          <button class="btn toggle" id="wxToggle" data-on="false">Start</button>
+        </header>
+        <dl class="kv">
+          <div><dt>Watching</dt><dd id="wxDir" class="path">—</dd></div>
+          <div><dt>Calling AE</dt><dd id="wxAet">—</dd></div>
+          <div><dt>On success</dt><dd id="wxMode">—</dd></div>
+          <div><dt>Sent</dt><dd id="wxSent">0</dd></div>
+          <div><dt>Failed</dt><dd id="wxFailed">0</dd></div>
+          <div><dt>Last</dt><dd id="wxLast">—</dd></div>
+        </dl>
+      </article>
+    </section>
+
+    <!-- ── Destinations ──────────────────────────────────────────────── -->
+    <section class="panel">
+      <header class="panel-head">
+        <h2>Destinations <small>remote DICOM nodes</small></h2>
+        <button class="btn ghost" id="addDest">+ Add node</button>
+      </header>
+      <div class="table-scroll">
+        <table class="grid" id="destTable">
+          <thead>
+            <tr><th>On</th><th>Name</th><th>Host</th><th>Port</th><th>AE title</th><th>TLS</th><th></th></tr>
+          </thead>
+          <tbody id="destBody"></tbody>
+        </table>
+      </div>
+      <p class="hint">New files in the watched folder are forwarded to every <em>enabled</em> node, retried until each accepts. Tick <em>TLS</em> to connect to a node over DICOM-TLS — the client cert/CA come from the Auto-send settings below.</p>
+    </section>
+
+    <!-- ── Settings ──────────────────────────────────────────────────── -->
+    <section class="panel">
+      <header class="panel-head"><h2>Settings</h2></header>
+      <div class="settings">
+        <fieldset>
+          <legend>Receiver (SCP)</legend>
+          <label>AE title <input id="scpAet" maxlength="16" /></label>
+          <label>Bind address <input id="scpBind" /></label>
+          <label>Port <input id="scpPort" type="number" min="1" max="65535" /></label>
+          <label>Storage folder <input id="scpDir" /></label>
+          <label class="check"><input id="scpOrganize" type="checkbox" /> Organize by Patient / Study / Series</label>
+          <label>Accept only these AEs <input id="scpAllowed" placeholder="comma-separated, blank = any" /></label>
+          <label class="check"><input id="scpTls" type="checkbox" /> Serve DICOM over TLS</label>
+          <label>TLS certificate (PEM) <input id="scpTlsCert" placeholder="path to server.crt" /></label>
+          <label>TLS private key (PEM) <input id="scpTlsKey" placeholder="path to server.key" /></label>
+          <label>Client-cert CA — mutual TLS <input id="scpTlsCa" placeholder="blank = don't require client certs" /></label>
+        </fieldset>
+        <fieldset>
+          <legend>Auto-send (SCU)</legend>
+          <label>Calling AE title <input id="scuAet" maxlength="16" /></label>
+          <label>Watch folder <input id="scuDir" /></label>
+          <label>Poll interval (s) <input id="scuPoll" type="number" min="1" step="1" /></label>
+          <label>After a file is sent
+            <select id="scuMode">
+              <option value="keep">Keep it in place</option>
+              <option value="move">Move to archive folder</option>
+              <option value="delete">Delete it</option>
+            </select>
+          </label>
+          <label>Archive folder <input id="scuSent" /></label>
+          <label class="check"><input id="scuTlsVerify" type="checkbox" /> Verify remote TLS certificate</label>
+          <label>Trusted CA bundle <input id="scuTlsCa" placeholder="blank = system trust store" /></label>
+          <label>Client certificate (PEM) <input id="scuTlsCert" placeholder="optional — for mutual TLS" /></label>
+          <label>Client private key (PEM) <input id="scuTlsKey" placeholder="optional" /></label>
+        </fieldset>
+      </div>
+      <div class="panel-actions">
+        <button class="btn" id="saveCfg">Save configuration</button>
+        <span class="save-note" id="saveNote"></span>
+      </div>
+    </section>
+
+    <!-- ── Activity log ──────────────────────────────────────────────── -->
+    <section class="panel">
+      <header class="panel-head">
+        <h2>Activity</h2>
+        <button class="btn ghost" id="clearLog">Clear view</button>
+      </header>
+      <div class="log" id="log"></div>
+    </section>
+  </main>
+
+  <!-- Row template for a destination -->
+  <template id="destRowTpl">
+    <tr>
+      <td><input type="checkbox" class="d-en" /></td>
+      <td><input class="d-name" placeholder="Name" /></td>
+      <td><input class="d-host" placeholder="host / IP" /></td>
+      <td><input class="d-port" type="number" min="1" max="65535" placeholder="104" /></td>
+      <td><input class="d-aet" maxlength="16" placeholder="AE" /></td>
+      <td style="text-align:center"><input type="checkbox" class="d-tls" title="Connect to this node over TLS" /></td>
+      <td class="row-actions">
+        <button class="btn tiny echo" title="C-ECHO test">Echo</button>
+        <button class="btn tiny danger del" title="Remove">✕</button>
+      </td>
+    </tr>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>

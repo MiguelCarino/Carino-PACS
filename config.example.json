@@ -1,0 +1,39 @@
+{
+  "scp": {
+    "aet": "CARINOPACS",
+    "bind": "0.0.0.0",
+    "port": 11112,
+    "storage_dir": "./received",
+    "organize": true,
+    "allowed_aets": [],
+    "tls": false,
+    "tls_cert": "",
+    "tls_key": "",
+    "tls_ca": ""
+  },
+  "scu": {
+    "aet": "CARINOSCU",
+    "watch_dir": "./outgoing",
+    "poll_interval": 3,
+    "on_success": "keep",
+    "sent_dir": "./sent",
+    "tls_verify": true,
+    "tls_ca": "",
+    "tls_cert": "",
+    "tls_key": ""
+  },
+  "destinations": [
+    {
+      "name": "Example PACS",
+      "host": "127.0.0.1",
+      "port": 104,
+      "aet": "REMOTEPACS",
+      "enabled": false,
+      "tls": false
+    }
+  ],
+  "web": {
+    "host": "127.0.0.1",
+    "port": 8042
+  }
+}

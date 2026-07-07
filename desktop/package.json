@@ -1,0 +1,45 @@
+{
+  "name": "carino-pacs-desktop",
+  "productName": "Carino PACS",
+  "version": "1.0.0",
+  "description": "Tray agent + desktop window for the Carino PACS DICOM store server",
+  "author": "Carino Systems",
+  "license": "MIT",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "@electron/notarize": "^2.5.0",
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "systems.carino.pacs",
+    "productName": "Carino PACS",
+    "afterSign": "build/notarize.js",
+    "files": ["main.js", "assets/**/*"],
+    "extraResources": [
+      { "from": "engine", "to": "engine" }
+    ],
+    "mac": {
+      "category": "public.app-category.medical",
+      "target": ["dmg", "zip"],
+      "icon": "assets/icon.png",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
+    },
+    "win": {
+      "target": ["nsis"],
+      "icon": "assets/icon.png"
+    },
+    "linux": {
+      "target": ["AppImage"],
+      "category": "Utility",
+      "icon": "assets/icon.png"
+    }
+  }
+}
