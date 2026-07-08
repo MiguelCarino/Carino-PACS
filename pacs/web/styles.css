@@ -163,6 +163,43 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 .btn.kill { background: transparent; color: var(--bad); border-color: var(--bad); margin-right: auto; }
 .btn.kill:hover { background: var(--bad); color: #fff; filter: none; transform: translateY(-1px); }
 
+/* ── Transaction history ────────────────────────────────────────── */
+.hist-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+.hist-tabs { display: flex; gap: 8px; }
+.hist-tab {
+  font-family: var(--mono); font-size: .74rem; text-transform: uppercase; letter-spacing: .06em;
+  background: transparent; color: var(--muted); border: 1px solid var(--border);
+  border-radius: 6px; padding: 7px 14px; cursor: pointer; transition: .15s;
+}
+.hist-tab:hover { color: var(--accent); border-color: var(--accent); }
+.hist-tab.active { background: var(--accent); color: #050505; border-color: var(--accent); font-weight: 700; }
+.hist-tools { display: flex; gap: 8px; }
+
+.hist-list { display: flex; flex-direction: column; gap: 8px; max-height: min(58vh, 520px); overflow-y: auto; padding-right: 4px; }
+.hist-list::-webkit-scrollbar { width: 9px; }
+.hist-list::-webkit-scrollbar-thumb { background: #1c1c1c; border-radius: 6px; }
+.hist-empty { color: var(--muted); font-family: var(--mono); font-size: .82rem; text-align: center; padding: 30px 10px; }
+
+.hist-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 11px 14px;
+}
+.hist-row:hover { border-color: #3a3a3a; }
+.hist-main { min-width: 0; flex: 1; }
+.hist-patient { font-weight: 700; font-size: .92rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hist-meta { color: var(--muted); font-family: var(--mono); font-size: .72rem; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hist-series { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+.hist-chip {
+  font-family: var(--mono); font-size: .62rem; color: var(--muted); background: #0a0a0a;
+  border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; white-space: nowrap;
+}
+.hist-chip.more { color: var(--accent); border-color: var(--accent); }
+.hist-actions { display: flex; gap: 6px; flex-shrink: 0; }
+@media (max-width: 620px) {
+  .hist-row { flex-direction: column; align-items: stretch; }
+  .hist-actions { justify-content: flex-end; }
+}
+
 /* Full-screen notice after the service is shut down */
 .stopped-overlay { position: fixed; inset: 0; z-index: 2147483647; display: flex;
   align-items: center; justify-content: center; text-align: center;

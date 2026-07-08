@@ -28,6 +28,15 @@ def _safe(component: str, fallback: str) -> str:
     return s[:120]
 
 
+def _peer_addr(event) -> str:
+    """Remote peer's IP address for an association event, or '?' if unavailable."""
+    try:
+        addr = event.assoc.requestor.address
+        return str(addr) if addr else "?"
+    except Exception:
+        return "?"
+
+
 def dest_path(base: str, ds, organize: bool) -> str:
     sop = _safe(getattr(ds, "SOPInstanceUID", ""), "unknown")
     if not organize:
@@ -74,7 +83,7 @@ class StorageSCP:
     # ---- DIMSE handlers ----------------------------------------------------
     def _handle_echo(self, event) -> int:
         who = event.assoc.requestor.ae_title
-        self.log.info(f"C-ECHO from {who}", kind="echo")
+        self.log.info(f"C-ECHO from {who} @ {_peer_addr(event)}", kind="echo")
         return 0x0000
 
     def _handle_store(self, event) -> int:
@@ -88,7 +97,8 @@ class StorageSCP:
                 self.received_count += 1
             who = event.assoc.requestor.ae_title
             self.log.info(
-                f"Stored {getattr(ds, 'Modality', '?')} {os.path.basename(path)} from {who}",
+                f"Stored {getattr(ds, 'Modality', '?')} {os.path.basename(path)} "
+                f"from {who} @ {_peer_addr(event)}",
                 kind="store",
                 path=path,
             )

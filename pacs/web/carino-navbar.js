@@ -55,7 +55,7 @@
   var MARKUP = ''
     + '<header class="top-header" id="carinoNav">'
     + '<div class="cn-left">'
-    + '<a class="brand-name" href="https://carino.systems/" title="Carino Systems — back to hub">Carino<span class="app-tag"></span></a>'
+    + '<a class="brand-name" href="https://carino.systems/" target="_blank" title="Carino Systems — back to hub">Carino<span class="app-tag"></span></a>'
     + '<div class="header-clock" id="cnClockWrap" role="button" tabindex="0" title="Click to toggle Local / UTC / Epoch / TAI / .beats">'
     + '<span class="clock-time" id="cnClock">00:00:00</span>'
     + '<span class="clock-tz" id="cnTz">LOCAL</span>'

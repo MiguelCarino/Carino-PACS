@@ -51,6 +51,7 @@
     <section class="actions-row">
       <button class="btn action" id="openSettings">⚙ Settings</button>
       <button class="btn action" id="openDests">🌐 Destinations</button>
+      <button class="btn action" id="openHistory">🗂 History</button>
       <button class="btn action" id="openLogs">📋 Logs</button>
     </section>
   </main>
@@ -126,6 +127,29 @@
     </div>
   </dialog>
 
+  <!-- ── Transaction history popup ─────────────────────────────────── -->
+  <dialog class="modal" id="dlgHistory">
+    <div class="modal-inner">
+      <header class="modal-head">
+        <h2>Transaction history <small>received &amp; sent studies</small></h2>
+        <button class="modal-x" data-close aria-label="Close">✕</button>
+      </header>
+      <div class="modal-body">
+        <div class="hist-bar">
+          <div class="hist-tabs">
+            <button class="hist-tab active" data-group="received">📥 Received</button>
+            <button class="hist-tab" data-group="sent">📤 Sent / Archived</button>
+          </div>
+          <div class="hist-tools">
+            <button class="btn ghost tiny" id="histRefresh" title="Rescan folder">↻ Refresh</button>
+            <button class="btn tiny danger" id="histDeleteAll">🗑 Delete all</button>
+          </div>
+        </div>
+        <div class="hist-list" id="histList"></div>
+      </div>
+    </div>
+  </dialog>
+
   <!-- ── Logs popup ────────────────────────────────────────────────── -->
   <dialog class="modal" id="dlgLogs">
     <div class="modal-inner">
@@ -144,6 +168,22 @@
 
   <!-- global toast (visible regardless of which popup is open) -->
   <div class="toast" id="toast" hidden></div>
+
+  <!-- Row template for a study in the history list -->
+  <template id="histRowTpl">
+    <div class="hist-row">
+      <div class="hist-main">
+        <div class="hist-patient"></div>
+        <div class="hist-meta"></div>
+        <div class="hist-series"></div>
+      </div>
+      <div class="hist-actions">
+        <button class="btn tiny hist-send" title="Forward to enabled destinations">Send</button>
+        <button class="btn tiny ghost hist-open" title="Open the folder on disk">Go to file</button>
+        <button class="btn tiny danger hist-del" title="Delete from disk">Delete</button>
+      </div>
+    </div>
+  </template>
 
   <!-- Row template for a destination -->
   <template id="destRowTpl">

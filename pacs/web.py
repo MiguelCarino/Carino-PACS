@@ -100,6 +100,41 @@ def create_app(server: PacsServer) -> Flask:
             since = 0
         return jsonify(last_seq=server.log.last_seq, entries=server.log.since(since))
 
+    # ---- study history (received / sent) ----------------------------------
+    @app.get("/api/studies")
+    def api_studies():
+        group = request.args.get("group", "received")
+        try:
+            return jsonify(server.list_studies(group))
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+
+    def _study_action(fn):
+        d = request.get_json(silent=True) or {}
+        path = d.get("path")
+        if not path:
+            return jsonify(ok=False, message="missing 'path'"), 400
+        res = fn(d.get("group", "received"), path)
+        return jsonify(res), (200 if res.get("ok") else 400)
+
+    @app.post("/api/studies/send")
+    def api_studies_send():
+        return _study_action(server.send_study)
+
+    @app.post("/api/studies/reveal")
+    def api_studies_reveal():
+        return _study_action(server.reveal_study)
+
+    @app.post("/api/studies/delete")
+    def api_studies_delete():
+        return _study_action(server.delete_study)
+
+    @app.post("/api/studies/delete-all")
+    def api_studies_delete_all():
+        group = (request.get_json(silent=True) or {}).get("group", "received")
+        res = server.delete_all_studies(group)
+        return jsonify(res), (200 if res.get("ok") else 400)
+
     @app.post("/api/shutdown")
     def api_shutdown():
         """Stop the workers and terminate the whole engine process."""

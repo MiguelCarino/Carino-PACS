@@ -4,6 +4,9 @@ dashboard drive the app exclusively through this object."""
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 import threading
 from typing import Optional
 
@@ -82,6 +85,117 @@ class PacsServer:
             f"C-ECHO {d.name}: {res.message}", kind="echo"
         )
         return res
+
+    # ---- study history / browse -------------------------------------------
+    def _group_root(self, group: str) -> Optional[str]:
+        """Resolve a history 'group' to its storage folder."""
+        if group == "received":
+            return self.cfg.resolved("scp", "storage_dir")
+        if group in ("sent", "archived"):
+            return self.cfg.resolved("scu", "sent_dir")
+        if group == "outgoing":
+            return self.cfg.resolved("scu", "watch_dir")
+        return None
+
+    def list_studies(self, group: str) -> dict:
+        from . import history
+        root = self._group_root(group)
+        if root is None:
+            raise ValueError("group must be received|sent")
+        return {"group": group, "root": root, "studies": history.scan_studies(root)}
+
+    def delete_study(self, group: str, path: str) -> dict:
+        from . import history
+        root = self._group_root(group)
+        if root is None:
+            return {"ok": False, "message": "group must be received|sent"}
+        try:
+            history.delete_study(root, path)
+        except (ValueError, OSError) as exc:
+            return {"ok": False, "message": str(exc)}
+        self.log.info(f"Deleted study {os.path.basename(path)} from {group}", kind="config")
+        return {"ok": True, "message": "Study deleted"}
+
+    def delete_all_studies(self, group: str) -> dict:
+        from . import history
+        root = self._group_root(group)
+        if root is None:
+            return {"ok": False, "message": "group must be received|sent"}
+        n = history.delete_all(root)
+        self.log.info(f"Deleted all {group} studies ({n} removed)", kind="config")
+        return {"ok": True, "removed": n, "message": f"Removed {n} studies"}
+
+    def reveal_study(self, group: str, path: str) -> dict:
+        root = self._group_root(group)
+        from .dicomfs import safe_within
+        if root is None or not safe_within(root, path):
+            return {"ok": False, "message": "path is outside the storage folder"}
+        folder = path if os.path.isdir(path) else os.path.dirname(path)
+        if not os.path.exists(folder):
+            return {"ok": False, "message": "folder no longer exists"}
+        try:
+            if sys.platform.startswith("win"):
+                os.startfile(folder)   # type: ignore[attr-defined]
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", folder])
+            else:
+                subprocess.Popen(["xdg-open", folder])
+        except Exception as exc:
+            return {"ok": False, "message": f"could not open folder: {exc}"}
+        return {"ok": True, "message": f"Opened {folder}"}
+
+    def send_study(self, group: str, path: str) -> dict:
+        """Forward every instance of a study to all enabled destinations.
+
+        Runs in a background thread so a big study doesn't block the request;
+        per-file results stream to the Activity log (kind='send')."""
+        from . import history
+        from .scu import Destination, c_store
+        root = self._group_root(group)
+        if root is None:
+            return {"ok": False, "message": "group must be received|sent"}
+        try:
+            files = history.study_files(root, path)
+        except (ValueError, OSError) as exc:
+            return {"ok": False, "message": str(exc)}
+        if not files:
+            return {"ok": False, "message": "no DICOM files found for this study"}
+        dests = [Destination.from_dict(d) for d in self.cfg.enabled_destinations()]
+        if not dests:
+            return {"ok": False, "message": "no enabled destinations — add one in Destinations first"}
+        ctx = None
+        if any(d.tls for d in dests):
+            try:
+                ctx = self._scu_tls_context()
+            except Exception as exc:
+                return {"ok": False, "message": f"TLS config error: {exc}"}
+        aet = self.cfg.scu.get("aet", "CARINOSCU")
+        label = os.path.basename(path.rstrip("/\\")) or "study"
+
+        def _run():
+            ok = fail = 0
+            for fp in files:
+                for d in dests:
+                    res = c_store(d, fp, aet, tls_context=ctx)
+                    if res.ok:
+                        ok += 1
+                        with self.watcher._lock:
+                            self.watcher.sent_count += 1
+                            self.watcher.last_activity = f"{os.path.basename(fp)} -> {d.name}"
+                        self.log.info(f"Sent {os.path.basename(fp)} -> {d.name}", kind="send")
+                    else:
+                        fail += 1
+                        with self.watcher._lock:
+                            self.watcher.failed_count += 1
+                        self.log.warn(f"Send {os.path.basename(fp)} -> {d.name}: {res.message}", kind="send")
+            self.log.info(
+                f"Manual send of {label} finished: {ok} ok, {fail} failed "
+                f"({len(files)} instance(s) → {len(dests)} node(s))",
+                kind="send",
+            )
+
+        threading.Thread(target=_run, name="pacs-send", daemon=True).start()
+        return {"ok": True, "message": f"Sending {len(files)} instance(s) to {len(dests)} destination(s)…"}
 
     # ---- config ------------------------------------------------------------
     def apply_config(self, new_data: dict) -> None:

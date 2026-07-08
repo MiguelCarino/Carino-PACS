@@ -199,6 +199,12 @@
 
   function flashNote(msg, ok) {
     const t = $("toast");
+    // A modal <dialog> renders in the browser "top layer", above every normal
+    // element (even z-index:max). Re-parent the toast into the open dialog so
+    // notifications show ON TOP of the popup instead of hidden behind it.
+    const openDlgs = document.querySelectorAll("dialog[open]");
+    const host = openDlgs.length ? openDlgs[openDlgs.length - 1] : document.body;
+    if (t.parentNode !== host) host.appendChild(t);
     t.textContent = msg;
     t.className = "toast " + (ok ? "ok" : "bad");
     t.hidden = false;
@@ -280,6 +286,97 @@
     document.body.appendChild(ov);
   }
 
+  /* ── Transaction history ─────────────────────────────────────── */
+  let histGroup = "received";
+
+  async function loadHistory() {
+    const list = $("histList");
+    list.innerHTML = "<div class='hist-empty'>Loading…</div>";
+    try {
+      const data = await api("/api/studies?group=" + histGroup);
+      renderHistory(data.studies || []);
+    } catch (e) {
+      list.innerHTML = "<div class='hist-empty'>Could not load: " + e.message + "</div>";
+    }
+  }
+
+  function renderHistory(studies) {
+    const list = $("histList");
+    list.innerHTML = "";
+    if (!studies.length) {
+      const label = histGroup === "sent" ? "archived" : "received";
+      list.innerHTML = "<div class='hist-empty'>No " + label + " studies yet.</div>";
+      return;
+    }
+    studies.forEach((s) => {
+      const row = $("histRowTpl").content.cloneNode(true).querySelector(".hist-row");
+      row.querySelector(".hist-patient").textContent =
+        (s.patient || "(no name)") + (s.patient_id ? "  ·  " + s.patient_id : "");
+      const meta = [
+        s.study_date || "no date",
+        s.study_desc || "(no study description)",
+        s.modality,
+        s.instances + (s.instances === 1 ? " image" : " images"),
+      ].filter(Boolean).join("  ·  ");
+      row.querySelector(".hist-meta").textContent = meta;
+
+      const ser = row.querySelector(".hist-series");
+      (s.series || []).slice(0, 8).forEach((se) => {
+        const chip = document.createElement("span");
+        chip.className = "hist-chip";
+        chip.textContent = (se.desc || se.modality || "series") + " (" + se.count + ")";
+        ser.appendChild(chip);
+      });
+      if ((s.series || []).length > 8) {
+        const more = document.createElement("span");
+        more.className = "hist-chip more";
+        more.textContent = "+" + (s.series.length - 8) + " more";
+        ser.appendChild(more);
+      }
+
+      const sendBtn = row.querySelector(".hist-send");
+      sendBtn.textContent = histGroup === "sent" ? "Resend" : "Send";
+      sendBtn.addEventListener("click", () => histAction("send", s, sendBtn));
+      row.querySelector(".hist-open").addEventListener("click", () => histAction("reveal", s));
+      row.querySelector(".hist-del").addEventListener("click", () => histDelete(s));
+      list.appendChild(row);
+    });
+  }
+
+  async function histAction(action, s, btn) {
+    const old = btn && btn.textContent;
+    if (btn) { btn.disabled = true; btn.textContent = "…"; }
+    try {
+      const r = await post("/api/studies/" + action, { group: histGroup, path: s.path });
+      flashNote(r.message || "OK", r.ok !== false);
+    } catch (e) {
+      flashNote(e.message, false);
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = old; }
+    }
+  }
+
+  async function histDelete(s) {
+    if (!confirm("Delete this study from disk?\n\n" + (s.patient || "(no name)") +
+                 "\n" + (s.study_desc || "") + "  —  " + s.instances + " image(s)")) return;
+    try {
+      const r = await post("/api/studies/delete", { group: histGroup, path: s.path });
+      flashNote(r.message || "Deleted", r.ok !== false);
+      loadHistory();
+    } catch (e) { flashNote(e.message, false); }
+  }
+
+  async function histDeleteAll() {
+    const label = histGroup === "sent" ? "archived" : "received";
+    if (!confirm("Delete ALL " + label + " studies?\n\nThis permanently removes every study in the " +
+                 label + " folder from disk.")) return;
+    try {
+      const r = await post("/api/studies/delete-all", { group: histGroup });
+      flashNote(r.message || ("Removed " + (r.removed || 0)), r.ok !== false);
+      loadHistory();
+    } catch (e) { flashNote(e.message, false); }
+  }
+
   /* ── Wire up ─────────────────────────────────────────────────── */
   document.addEventListener("DOMContentLoaded", () => {
     $("killSvc").addEventListener("click", killService);
@@ -291,14 +388,31 @@
     $("clearLog").addEventListener("click", () => { $("log").innerHTML = ""; });
     wireDropZones();
 
-    // Popup windows: three buttons → native <dialog> modals.
+    // Popup windows: buttons → native <dialog> modals.
     const openMap = { openSettings: "dlgSettings", openDests: "dlgDests", openLogs: "dlgLogs" };
     Object.keys(openMap).forEach((b) =>
       $(b).addEventListener("click", () => { const d = $(openMap[b]); if (d && !d.open) d.showModal(); }));
     document.querySelectorAll(".modal").forEach((dlg) => {
       dlg.querySelectorAll("[data-close]").forEach((x) => x.addEventListener("click", () => dlg.close()));
       dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });  // click backdrop to close
+      // when a modal closes, return the toast to <body> so it isn't stuck hidden inside it
+      dlg.addEventListener("close", () => document.body.appendChild($("toast")));
     });
+
+    // History popup: open + load, tab switching, refresh, delete-all.
+    $("openHistory").addEventListener("click", () => {
+      const d = $("dlgHistory"); if (d && !d.open) d.showModal();
+      loadHistory();
+    });
+    document.querySelectorAll(".hist-tab").forEach((tab) =>
+      tab.addEventListener("click", () => {
+        document.querySelectorAll(".hist-tab").forEach((t) => t.classList.remove("active"));
+        tab.classList.add("active");
+        histGroup = tab.dataset.group;
+        loadHistory();
+      }));
+    $("histRefresh").addEventListener("click", loadHistory);
+    $("histDeleteAll").addEventListener("click", histDeleteAll);
 
     loadConfig().catch((e) => flashNote("Load failed: " + e.message, false));
     pollStatus();

@@ -23,19 +23,10 @@ import time
 from typing import Optional
 
 from .config import Config
+from .dicomfs import is_dicom, prune_empty_dirs
 from .logbuf import LogBuffer
 from .scu import Destination, c_store
 from .state import SendState
-
-
-def is_dicom(path: str) -> bool:
-    """True if the file has the DICM magic at offset 128 (extension-agnostic)."""
-    try:
-        with open(path, "rb") as fh:
-            fh.seek(128)
-            return fh.read(4) == b"DICM"
-    except OSError:
-        return False
 
 
 class FolderWatcher:
@@ -178,6 +169,8 @@ class FolderWatcher:
                 os.remove(path)
                 self.state.drop(path)
                 self._sizes.pop(path, None)
+                # don't leave the now-empty Patient/Study/Series folders behind
+                prune_empty_dirs(os.path.dirname(path), watch)
                 self.log.info(f"Deleted after send: {os.path.basename(path)}", kind="send")
             except OSError as exc:
                 self.log.warn(f"Could not delete {path}: {exc}", kind="send")
@@ -189,6 +182,9 @@ class FolderWatcher:
                 shutil.move(path, target)
                 self.state.drop(path)
                 self._sizes.pop(path, None)
+                # the file moved to the archive — clear the empty source folders
+                # it left in the outgoing tree
+                prune_empty_dirs(os.path.dirname(path), watch)
                 self.log.info(f"Archived after send: {rel}", kind="send")
             except OSError as exc:
                 self.log.warn(f"Could not move {path}: {exc}", kind="send")
