@@ -2,6 +2,9 @@
 
 A small, cross-platform **DICOM store-only PACS**. It does two things:
 
+<img width="1160" height="868" alt="image" src="https://github.com/user-attachments/assets/9e30ba10-e34b-42f0-a97c-96eaf5a67ddb" />
+
+
 - **Receive** — a Storage SCP that accepts `C-STORE` (and `C-ECHO`) and files incoming studies to disk, optionally organized by Patient / Study / Series.
 - **Auto-send** — watches a folder and automatically forwards every new `.dcm` to **N** remote DICOM nodes via `C-STORE`, retrying each host until it accepts.
 
