@@ -13,7 +13,7 @@ from PyInstaller.utils.hooks import collect_all
 ROOT = os.path.dirname(SPECPATH)
 
 datas, binaries, hiddenimports = [], [], []
-for pkg in ("pynetdicom", "pydicom"):
+for pkg in ("pynetdicom", "pydicom", "PIL"):
     d, b, h = collect_all(pkg)
     datas += d
     binaries += b

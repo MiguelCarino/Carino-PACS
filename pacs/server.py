@@ -197,6 +197,83 @@ class PacsServer:
         threading.Thread(target=_run, name="pacs-send", daemon=True).start()
         return {"ok": True, "message": f"Sending {len(files)} instance(s) to {len(dests)} destination(s)…"}
 
+    def attach_to_study(self, group: str, path: str, filename: str, data: bytes) -> dict:
+        """Wrap an uploaded PDF/image as a DICOM instance inheriting the target
+        study's identity and drop it into the study's folder as a new series.
+        The user then hits Send/Resend to forward the study (report included)."""
+        from . import history, ingest
+        from .dicomfs import safe_within
+        root = self._group_root(group)
+        if root is None:
+            return {"ok": False, "message": "group must be received|sent"}
+        if not safe_within(root, path):
+            return {"ok": False, "message": "path is outside the storage folder"}
+        kind = ingest.detect_kind_bytes(data, filename)
+        if not kind:
+            return {"ok": False, "message": "unsupported file — attach a PDF, JPEG or PNG"}
+        try:
+            identity = history.study_identity(root, path)
+        except (ValueError, OSError) as exc:
+            return {"ok": False, "message": str(exc)}
+        if not identity:
+            return {"ok": False, "message": "could not read the study's patient/identity"}
+        identity["series_desc"] = os.path.splitext(os.path.basename(filename))[0] or "Attachment"
+        study_dir = path if os.path.isdir(path) else os.path.dirname(path)
+        # Land it in its own subfolder so it reads as a separate DOC/OT series
+        # (the browser groups a study one modality per folder).
+        dest_dir = os.path.join(study_dir, "attachments")
+        try:
+            ds = ingest.build_from_bytes(data, kind, identity)
+            out = ingest.save_instance(ds, dest_dir)
+        except Exception as exc:
+            return {"ok": False, "message": f"could not convert: {exc}"}
+        self.log.info(f"Attached {filename} to study {os.path.basename(study_dir)} ({group})", kind="config")
+        return {"ok": True, "message": f"Attached {filename} — hit {'Resend' if group in ('sent', 'archived') else 'Send'} to forward it",
+                "file": os.path.basename(out)}
+
+    # ---- pending imports (non-DICOM awaiting review) ----------------------
+    def _pending_dir(self) -> str:
+        return self.cfg.resolved("scu", "pending_dir")
+
+    def list_pending(self) -> dict:
+        from . import ingest
+        d = self._pending_dir()
+        return {"root": d, "items": ingest.list_pending(d)}
+
+    def approve_pending(self, pid: str, edits: dict) -> dict:
+        """Convert a queued file into the outgoing folder so the normal
+        auto-send + archive pipeline forwards and files it."""
+        from . import ingest
+        watch = self.cfg.resolved("scu", "watch_dir")
+        try:
+            out = ingest.approve_pending(self._pending_dir(), pid, edits or {}, watch)
+        except (ValueError, OSError) as exc:
+            return {"ok": False, "message": str(exc)}
+        except Exception as exc:
+            return {"ok": False, "message": f"could not convert: {exc}"}
+        self.log.info(f"Approved review item → {os.path.basename(out)} into outgoing", kind="config")
+        if self.watcher.running:
+            msg = "Converted and queued — Auto-send will forward it."
+        else:
+            msg = "Converted into the outgoing folder — start Auto-send to forward it."
+        return {"ok": True, "message": msg}
+
+    def discard_pending(self, pid: str) -> dict:
+        from . import ingest
+        try:
+            ok = ingest.discard_pending(self._pending_dir(), pid)
+        except ValueError as exc:
+            return {"ok": False, "message": str(exc)}
+        return {"ok": ok, "message": "Discarded" if ok else "item not found"}
+
+    def pending_preview(self, pid: str):
+        """(folder, filename) of a queued file's raw bytes, or None."""
+        from . import ingest
+        try:
+            return ingest.preview_path(self._pending_dir(), pid)
+        except ValueError:
+            return None
+
     # ---- config ------------------------------------------------------------
     def apply_config(self, new_data: dict) -> None:
         """Persist a new config from the dashboard and hot-apply it.
@@ -233,6 +310,7 @@ class PacsServer:
             s.close()
 
     def status(self) -> dict:
+        from . import ingest
         scp = self.scp
         return {
             "receiver": {
@@ -259,6 +337,7 @@ class PacsServer:
             "config_path": self.cfg.path,
             "logs_dir": self.cfg.logs_dir,
             "host_ip": self._local_ip(),
+            "pending": ingest.count_pending(self._pending_dir()),
         }
 
     def shutdown(self) -> None:

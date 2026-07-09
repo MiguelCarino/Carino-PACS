@@ -35,6 +35,14 @@
       }
     }
 
+    // Pending-imports badge on the 📎 button.
+    const badge = $("pendingBadge");
+    if (badge) {
+      const n = s.pending || 0;
+      badge.textContent = String(n);
+      badge.hidden = n === 0;
+    }
+
     setDot($("rxDot"), rx.running);
     $("rxAet").textContent = rx.aet;
     $("rxAddr").textContent = `${rx.bind}:${rx.port}`;
@@ -353,6 +361,7 @@
       const sendBtn = row.querySelector(".hist-send");
       sendBtn.textContent = histGroup === "sent" ? "Resend" : "Send";
       sendBtn.addEventListener("click", () => histAction("send", s, sendBtn));
+      row.querySelector(".hist-attach").addEventListener("click", () => histAttach(s));
       row.querySelector(".hist-open").addEventListener("click", () => histAction("reveal", s));
       row.querySelector(".hist-del").addEventListener("click", () => histDelete(s));
       list.appendChild(row);
@@ -393,6 +402,104 @@
     } catch (e) { flashNote(e.message, false); }
   }
 
+  // Attach a PDF/image to an existing study (inherits its identity, new series).
+  function histAttach(s) {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".pdf,.jpg,.jpeg,.png,application/pdf,image/*";
+    input.addEventListener("change", async () => {
+      const f = input.files && input.files[0];
+      if (!f) return;
+      const fd = new FormData();
+      fd.append("group", histGroup);
+      fd.append("path", s.path);
+      fd.append("file", f);
+      try {
+        const res = await fetch("/api/studies/attach", { method: "POST", body: fd });
+        let body = {}; try { body = await res.json(); } catch (e) { /* empty */ }
+        flashNote(body.message || (res.ok ? "Attached" : "Attach failed"), res.ok && body.ok !== false);
+        if (res.ok) loadHistory();
+      } catch (e) { flashNote(e.message, false); }
+    });
+    input.click();
+  }
+
+  /* ── Pending imports (non-DICOM review queue) ────────────────── */
+  function fmtDate(raw) {
+    const s = String(raw || "");
+    return (s.length === 8 && /^\d+$/.test(s)) ? s.slice(0, 4) + "-" + s.slice(4, 6) + "-" + s.slice(6, 8) : s;
+  }
+
+  async function loadPending() {
+    const list = $("pendingList");
+    list.innerHTML = "<div class='hist-empty'>Loading…</div>";
+    try {
+      const data = await api("/api/pending");
+      renderPending(data.items || []);
+    } catch (e) {
+      list.innerHTML = "<div class='hist-empty'>Could not load: " + e.message + "</div>";
+    }
+  }
+
+  function renderPending(items) {
+    const list = $("pendingList");
+    list.innerHTML = "";
+    if (!items.length) {
+      list.innerHTML = "<div class='hist-empty'>Nothing waiting for review.</div>";
+      return;
+    }
+    items.forEach((it) => {
+      const row = $("pendingRowTpl").content.cloneNode(true).querySelector(".pend-row");
+      const kind = row.querySelector(".pend-kind");
+      kind.textContent = it.kind === "pdf" ? "PDF" : "IMAGE";
+      kind.classList.add(it.kind === "pdf" ? "k-pdf" : "k-img");
+      row.querySelector(".pend-file").textContent = it.filename || "(file)";
+      row.querySelector(".pend-preview").href = "/api/pending/preview?id=" + encodeURIComponent(it.id);
+      row.querySelector(".pf-patient").value = it.patient || "";
+      row.querySelector(".pf-pid").value = it.patient_id || "";
+      row.querySelector(".pf-date").value = fmtDate(it.study_date);
+      row.querySelector(".pf-sdesc").value = it.study_desc || "";
+      row.querySelector(".pf-serdesc").value = it.series_desc || "";
+      row.querySelector(".pend-src").textContent = it.source ? ("from " + it.source) : "";
+      const appBtn = row.querySelector(".pend-approve");
+      appBtn.addEventListener("click", () => approvePending(it.id, row, appBtn));
+      row.querySelector(".pend-discard").addEventListener("click", () => discardPending(it.id, it));
+      list.appendChild(row);
+    });
+  }
+
+  async function approvePending(id, row, btn) {
+    const edits = {
+      id: id,
+      patient: row.querySelector(".pf-patient").value.trim(),
+      patient_id: row.querySelector(".pf-pid").value.trim(),
+      study_date: row.querySelector(".pf-date").value.trim(),
+      study_desc: row.querySelector(".pf-sdesc").value.trim(),
+      series_desc: row.querySelector(".pf-serdesc").value.trim(),
+    };
+    const old = btn.textContent; btn.disabled = true; btn.textContent = "…";
+    try {
+      const r = await post("/api/pending/approve", edits);
+      flashNote(r.message || "Approved", r.ok !== false);
+      loadPending();
+      pollStatus();
+    } catch (e) {
+      flashNote(e.message, false);
+      btn.disabled = false; btn.textContent = old;
+    }
+  }
+
+  async function discardPending(id, it) {
+    if (!confirm("Discard this file?\n\n" + (it.filename || "") +
+                 "\n\nIt is permanently deleted without importing.")) return;
+    try {
+      const r = await post("/api/pending/discard", { id });
+      flashNote(r.message || "Discarded", r.ok !== false);
+      loadPending();
+      pollStatus();
+    } catch (e) { flashNote(e.message, false); }
+  }
+
   /* ── Wire up ─────────────────────────────────────────────────── */
   document.addEventListener("DOMContentLoaded", () => {
     $("killSvc").addEventListener("click", killService);
@@ -429,6 +536,13 @@
       }));
     $("histRefresh").addEventListener("click", loadHistory);
     $("histDeleteAll").addEventListener("click", histDeleteAll);
+
+    // Pending-imports popup: open + load, refresh.
+    $("openPending").addEventListener("click", () => {
+      const d = $("dlgPending"); if (d && !d.open) d.showModal();
+      loadPending();
+    });
+    $("pendRefresh").addEventListener("click", loadPending);
 
     loadConfig().catch((e) => flashNote("Load failed: " + e.message, false));
     pollStatus();

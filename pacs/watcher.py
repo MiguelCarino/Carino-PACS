@@ -100,11 +100,13 @@ class FolderWatcher:
             self._stop.wait(max(1.0, interval))
         self.log.info("Watcher stopped", kind="watch")
 
-    def _candidates(self, watch: str, sent_dir: str) -> list[str]:
+    def _candidates(self, watch: str, skip_dirs: list[str]) -> list[str]:
+        skips = [os.path.abspath(d) for d in skip_dirs if d]
         found = []
         for root, _dirs, files in os.walk(watch):
-            # never rescan files we moved into the sent archive
-            if os.path.abspath(root).startswith(os.path.abspath(sent_dir)):
+            # never rescan the archive or the pending-review store
+            aroot = os.path.abspath(root)
+            if any(aroot == s or aroot.startswith(s + os.sep) for s in skips):
                 continue
             for name in files:
                 if name.startswith("."):
@@ -118,6 +120,7 @@ class FolderWatcher:
         scu = self.cfg.scu
         watch = self.cfg.resolved("scu", "watch_dir")
         sent_dir = self.cfg.resolved("scu", "sent_dir")
+        pending_dir = self.cfg.resolved("scu", "pending_dir")
         calling_aet = scu.get("aet", "CARINOSCU")
         on_success = scu.get("on_success", "keep")
         dests = [Destination.from_dict(d) for d in self.cfg.enabled_destinations()]
@@ -143,7 +146,7 @@ class FolderWatcher:
 
         want = {d.name for d in dests}
 
-        for path in self._candidates(watch, sent_dir):
+        for path in self._candidates(watch, [sent_dir, pending_dir]):
             if self._stop.is_set():
                 return
             try:
@@ -185,7 +188,7 @@ class FolderWatcher:
         # Archive/delete whole studies once all their DICOMs are fully sent —
         # moves EVERYTHING (non-DICOM files and subfolders too) and leaves no
         # folders behind in the outgoing tree.
-        self._archive_pass(watch, sent_dir, on_success, want)
+        self._archive_pass(watch, sent_dir, pending_dir, on_success, want)
         self.state.save()
 
     # --------------------------------------------------------------- archiving
@@ -206,7 +209,64 @@ class FolderWatcher:
         e = self.state.peek(path)
         return bool(e) and want.issubset(set(e.get("sent", [])))
 
-    def _archive_pass(self, watch, sent_dir, on_success, want) -> None:
+    def _convertibles_under(self, entrypath: str) -> list[tuple[str, str]]:
+        """(path, kind) for every non-DICOM PDF/image under *entrypath*."""
+        from . import ingest
+        if os.path.isfile(entrypath):
+            k = None if is_dicom(entrypath) else ingest.detect_kind(entrypath)
+            return [(entrypath, k)] if k else []
+        out = []
+        for root, _dirs, files in os.walk(entrypath):
+            for f in files:
+                if f.startswith("."):
+                    continue
+                p = os.path.join(root, f)
+                if is_dicom(p):
+                    continue
+                k = ingest.detect_kind(p)
+                if k:
+                    out.append((p, k))
+        return out
+
+    def _study_identity(self, dicoms: list[str]) -> dict:
+        """Patient/study identity read from a sibling DICOM header, so a queued
+        report inherits the study it was sitting next to."""
+        from .history import _fmt_name, _read_header
+        hdr = None
+        for p in dicoms:
+            hdr = _read_header(p)
+            if hdr is not None:
+                break
+        if hdr is None:
+            return {}
+        return {
+            "patient": _fmt_name(getattr(hdr, "PatientName", "")),
+            "patient_name": str(getattr(hdr, "PatientName", "") or ""),
+            "patient_id": str(getattr(hdr, "PatientID", "") or ""),
+            "study_uid": str(getattr(hdr, "StudyInstanceUID", "") or ""),
+            "study_date": str(getattr(hdr, "StudyDate", "") or ""),
+            "study_desc": str(getattr(hdr, "StudyDescription", "") or ""),
+        }
+
+    def _siphon_pending(self, entrypath, pending_dir, dicoms, name) -> int:
+        """Move any PDF/image beside a study into the pending-review store,
+        pre-filling its identity from the study. Returns how many were queued."""
+        conv = self._convertibles_under(entrypath)
+        if not conv or not pending_dir:
+            return 0
+        from . import ingest
+        identity = self._study_identity(dicoms)
+        identity["source"] = name
+        queued = 0
+        for path, kind in conv:
+            try:
+                ingest.stage_pending(pending_dir, path, identity, kind)
+                queued += 1
+            except OSError as exc:
+                self.log.warn(f"Could not queue {os.path.basename(path)} for review: {exc}", kind="send")
+        return queued
+
+    def _archive_pass(self, watch, sent_dir, pending_dir, on_success, want) -> None:
         """After sending, for each top-level item in the outgoing folder whose
         every DICOM has reached all enabled nodes, move/delete the WHOLE item
         (all files & subfolders) so nothing — empty or not — is left behind."""
@@ -217,6 +277,7 @@ class FolderWatcher:
         except OSError:
             return
         sent_abs = os.path.abspath(sent_dir)
+        pending_abs = os.path.abspath(pending_dir) if pending_dir else None
         for name in names:
             if name.startswith("."):
                 continue
@@ -224,11 +285,18 @@ class FolderWatcher:
             ap = os.path.abspath(entrypath)
             if ap == sent_abs or ap.startswith(sent_abs + os.sep):
                 continue  # never touch the archive itself (if nested under watch)
+            if pending_abs and (ap == pending_abs or ap.startswith(pending_abs + os.sep)):
+                continue  # never touch the pending store (if nested under watch)
             dicoms = self._dicoms_under(entrypath)
             if not dicoms:
                 continue  # not a study (contains no DICOM) — leave it untouched
             if not all(self._fully_sent(f, want) for f in dicoms):
                 continue  # some instance still pending/failed — retry next pass
+            # Route any PDF/image beside the study to the review queue first, so
+            # the archive/delete below only handles DICOM + inert files.
+            queued = self._siphon_pending(entrypath, pending_dir, dicoms, name)
+            if queued:
+                self.log.info(f"Queued {queued} non-DICOM file(s) from {name} for review", kind="send")
             try:
                 if on_success == "delete":
                     if os.path.isdir(entrypath):

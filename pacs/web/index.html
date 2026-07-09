@@ -55,6 +55,7 @@
       <button class="btn action" id="openSettings">⚙ Settings</button>
       <button class="btn action" id="openDests">🌐 Destinations</button>
       <button class="btn action" id="openHistory">🗂 History</button>
+      <button class="btn action" id="openPending">📎 Pending<span class="badge" id="pendingBadge" hidden>0</span></button>
       <button class="btn action" id="openLogs">📋 Logs</button>
     </section>
   </main>
@@ -153,6 +154,25 @@
     </div>
   </dialog>
 
+  <!-- ── Pending imports popup ─────────────────────────────────────── -->
+  <dialog class="modal" id="dlgPending">
+    <div class="modal-inner">
+      <header class="modal-head">
+        <h2>Pending imports <small>non-DICOM awaiting review</small></h2>
+        <button class="modal-x" data-close aria-label="Close">✕</button>
+      </header>
+      <div class="modal-body">
+        <div class="hist-bar">
+          <p class="hint" style="margin:0;max-width:60ch">PDFs &amp; images found beside a study are queued here with the study's details pre-filled. Confirm, then <em>Approve</em> to convert them to DICOM and send.</p>
+          <div class="hist-tools">
+            <button class="btn ghost tiny" id="pendRefresh" title="Rescan the pending folder">↻ Refresh</button>
+          </div>
+        </div>
+        <div class="hist-list" id="pendingList"></div>
+      </div>
+    </div>
+  </dialog>
+
   <!-- ── Logs popup ────────────────────────────────────────────────── -->
   <dialog class="modal" id="dlgLogs">
     <div class="modal-inner">
@@ -182,8 +202,34 @@
       </div>
       <div class="hist-actions">
         <button class="btn tiny hist-send" title="Forward to enabled destinations">Send</button>
+        <button class="btn tiny ghost hist-attach" title="Attach a PDF/image as a new series">📎 Attach</button>
         <button class="btn tiny ghost hist-open" title="Open the folder on disk">Go to file</button>
         <button class="btn tiny danger hist-del" title="Delete from disk">Delete</button>
+      </div>
+    </div>
+  </template>
+
+  <!-- Row template for a pending (non-DICOM) import awaiting review -->
+  <template id="pendingRowTpl">
+    <div class="pend-row">
+      <div class="pend-head">
+        <span class="pend-kind"></span>
+        <span class="pend-file"></span>
+        <a class="pend-preview" target="_blank" rel="noopener">Preview</a>
+      </div>
+      <div class="pend-fields">
+        <label>Patient name <input class="pf-patient" /></label>
+        <label>Patient ID <input class="pf-pid" /></label>
+        <label>Study date <input class="pf-date" placeholder="YYYY-MM-DD" /></label>
+        <label>Study description <input class="pf-sdesc" /></label>
+        <label class="wide">Series description <input class="pf-serdesc" placeholder="e.g. Ultrasound report" /></label>
+      </div>
+      <div class="pend-foot">
+        <span class="pend-src"></span>
+        <span class="pend-actions">
+          <button class="btn tiny pend-approve" title="Convert to DICOM and send">Approve &amp; send</button>
+          <button class="btn tiny danger pend-discard" title="Delete without importing">Discard</button>
+        </span>
       </div>
     </div>
   </template>

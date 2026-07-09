@@ -38,6 +38,7 @@ DEFAULTS: dict[str, Any] = {
         "poll_interval": 3,
         "on_success": "keep",   # keep | move | delete
         "sent_dir": "./sent",
+        "pending_dir": "./pending",  # non-DICOM (PDF/image) files awaiting review+convert
         "tls_verify": True,     # verify the remote server's certificate
         "tls_ca": "",           # CA bundle to verify against ("" = system trust store)
         "tls_cert": "",         # our client certificate for mutual TLS (optional)
@@ -48,7 +49,7 @@ DEFAULTS: dict[str, Any] = {
     "logs_dir": "./logs",       # dated log files (one per day) live here
 }
 
-_PATH_FIELDS = [("scp", "storage_dir"), ("scu", "watch_dir"), ("scu", "sent_dir")]
+_PATH_FIELDS = [("scp", "storage_dir"), ("scu", "watch_dir"), ("scu", "sent_dir"), ("scu", "pending_dir")]
 
 
 def _deep_merge(base: dict, over: dict) -> dict:

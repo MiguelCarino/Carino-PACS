@@ -138,6 +138,11 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
   border: 1px solid var(--border); border-radius: 12px;
 }
 .btn.action:hover { border-color: var(--accent); color: var(--accent); transform: translateY(-2px); }
+.btn.action .badge {
+  display: inline-block; min-width: 20px; margin-left: 8px; padding: 0 6px;
+  font-family: var(--mono); font-size: .7rem; font-weight: 700; line-height: 20px;
+  color: #050505; background: var(--accent); border-radius: 10px; vertical-align: middle;
+}
 @media (max-width: 620px) { .actions-row { flex-direction: column; } }
 
 /* ── Popup windows (native <dialog>) ────────────────────────────── */
@@ -210,8 +215,39 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 .hist-actions { display: flex; gap: 6px; flex-shrink: 0; }
 @media (max-width: 620px) {
   .hist-row { flex-direction: column; align-items: stretch; }
-  .hist-actions { justify-content: flex-end; }
+  .hist-actions { justify-content: flex-end; flex-wrap: wrap; }
 }
+
+/* ── Pending imports (non-DICOM review queue) ───────────────────── */
+.pend-row {
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px;
+  padding: 12px 14px; display: flex; flex-direction: column; gap: 11px;
+}
+.pend-row:hover { border-color: #3a3a3a; }
+.pend-head { display: flex; align-items: center; gap: 10px; }
+.pend-kind {
+  font-family: var(--mono); font-size: .58rem; font-weight: 700; letter-spacing: .08em;
+  padding: 2px 7px; border-radius: 4px; border: 1px solid var(--border); color: var(--muted); flex-shrink: 0;
+}
+.pend-kind.k-pdf { color: #f87171; border-color: #f87171; }
+.pend-kind.k-img { color: #60a5fa; border-color: #60a5fa; }
+.pend-file { font-weight: 700; font-size: .88rem; flex: 1; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pend-preview { color: var(--accent); font-family: var(--mono); font-size: .7rem; text-decoration: none;
+  border: 1px solid var(--border); border-radius: 5px; padding: 4px 10px; flex-shrink: 0; }
+.pend-preview:hover { border-color: var(--accent); }
+.pend-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 9px 12px; }
+.pend-fields label { display: flex; flex-direction: column; gap: 3px;
+  font-family: var(--mono); font-size: .62rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.pend-fields label.wide { grid-column: 1 / -1; }
+.pend-fields input { background: #0a0a0a; border: 1px solid var(--border); border-radius: 6px;
+  padding: 7px 9px; color: var(--text); font-size: .82rem; font-family: inherit; }
+.pend-fields input:focus { outline: none; border-color: var(--accent); }
+.pend-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.pend-src { color: var(--muted); font-family: var(--mono); font-size: .68rem;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pend-actions { display: flex; gap: 6px; flex-shrink: 0; }
+@media (max-width: 620px) { .pend-fields { grid-template-columns: 1fr; } }
 
 /* Full-screen notice after the service is shut down */
 .stopped-overlay { position: fixed; inset: 0; z-index: 2147483647; display: flex;

@@ -17,6 +17,7 @@
     "poll_interval": 3,
     "on_success": "keep",
     "sent_dir": "./sent",
+    "pending_dir": "./pending",
     "tls_verify": true,
     "tls_ca": "",
     "tls_cert": "",

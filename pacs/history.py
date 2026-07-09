@@ -130,6 +130,31 @@ def study_files(root: str, path: str) -> list[str]:
     return files
 
 
+def study_identity(root: str, path: str) -> dict:
+    """Patient/study identity of an existing study, for a report/image attached
+    to it to inherit (keeps the new instance grouped under the same study).
+
+    Gated to *root* via study_files; returns {} if the study has no DICOM."""
+    files = study_files(root, path)
+    hdr = None
+    for p in files:
+        hdr = _read_header(p)
+        if hdr is not None:
+            break
+    if hdr is None:
+        return {}
+    return {
+        "patient": _fmt_name(getattr(hdr, "PatientName", "")),
+        "patient_name": str(getattr(hdr, "PatientName", "") or ""),
+        "patient_id": str(getattr(hdr, "PatientID", "") or ""),
+        "study_uid": str(getattr(hdr, "StudyInstanceUID", "") or ""),
+        "study_date": str(getattr(hdr, "StudyDate", "") or ""),
+        "study_desc": str(getattr(hdr, "StudyDescription", "") or ""),
+        "accession": str(getattr(hdr, "AccessionNumber", "") or ""),
+        "study_id": str(getattr(hdr, "StudyID", "") or ""),
+    }
+
+
 def delete_study(root: str, path: str) -> None:
     """Delete one study's folder (or file) and prune the empty parents it leaves."""
     real_root = os.path.realpath(root)

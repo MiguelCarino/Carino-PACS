@@ -135,6 +135,50 @@ def create_app(server: PacsServer) -> Flask:
         res = server.delete_all_studies(group)
         return jsonify(res), (200 if res.get("ok") else 400)
 
+    @app.post("/api/studies/attach")
+    def api_studies_attach():
+        """Multipart: 'group', 'path', and a 'file' (PDF/JPEG/PNG) to wrap as a
+        DICOM instance attached to that study."""
+        group = request.form.get("group", "received")
+        path = request.form.get("path")
+        up = request.files.get("file")
+        if not path or up is None or not up.filename:
+            return jsonify(ok=False, message="need a study 'path' and a 'file'"), 400
+        res = server.attach_to_study(group, path, up.filename, up.read())
+        return jsonify(res), (200 if res.get("ok") else 400)
+
+    # ---- pending imports (non-DICOM awaiting review) ----------------------
+    @app.get("/api/pending")
+    def api_pending():
+        return jsonify(server.list_pending())
+
+    @app.post("/api/pending/approve")
+    def api_pending_approve():
+        d = request.get_json(silent=True) or {}
+        pid = d.get("id")
+        if not pid:
+            return jsonify(ok=False, message="missing 'id'"), 400
+        edits = {k: d.get(k) for k in ("patient", "patient_id", "study_desc", "series_desc", "study_date") if k in d}
+        res = server.approve_pending(pid, edits)
+        return jsonify(res), (200 if res.get("ok") else 400)
+
+    @app.post("/api/pending/discard")
+    def api_pending_discard():
+        pid = (request.get_json(silent=True) or {}).get("id")
+        if not pid:
+            return jsonify(ok=False, message="missing 'id'"), 400
+        res = server.discard_pending(pid)
+        return jsonify(res), (200 if res.get("ok") else 400)
+
+    @app.get("/api/pending/preview")
+    def api_pending_preview():
+        pid = request.args.get("id", "")
+        loc = server.pending_preview(pid)
+        if not loc:
+            return jsonify(error="not found"), 404
+        folder, filename = loc
+        return send_from_directory(folder, filename)
+
     @app.post("/api/shutdown")
     def api_shutdown():
         """Stop the workers and terminate the whole engine process."""
