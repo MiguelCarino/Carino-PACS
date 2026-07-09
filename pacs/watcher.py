@@ -23,10 +23,36 @@ import time
 from typing import Optional
 
 from .config import Config
-from .dicomfs import is_dicom, prune_empty_dirs
+from .dicomfs import is_dicom
 from .logbuf import LogBuffer
 from .scu import Destination, c_store
 from .state import SendState
+
+
+def _dedupe(target: str) -> str:
+    """A non-clashing variant of *target* (adds _1, _2… before the extension)."""
+    if not os.path.exists(target):
+        return target
+    base, ext = os.path.splitext(target)
+    i = 1
+    while os.path.exists(f"{base}_{i}{ext}"):
+        i += 1
+    return f"{base}_{i}{ext}"
+
+
+def _merge_move(src: str, dst: str) -> None:
+    """Recursively move EVERYTHING from *src* into *dst* (files, subfolders,
+    non-DICOM and all), then remove the now-empty source tree."""
+    os.makedirs(dst, exist_ok=True)
+    for name in os.listdir(src):
+        s = os.path.join(src, name)
+        d = os.path.join(dst, name)
+        if os.path.isdir(s):
+            _merge_move(s, d)
+        else:
+            os.makedirs(os.path.dirname(d) or ".", exist_ok=True)
+            shutil.move(s, _dedupe(d))
+    os.rmdir(src)
 
 
 class FolderWatcher:
@@ -135,7 +161,6 @@ class FolderWatcher:
             entry = self.state.get(path, size, mtime)
             todo = [d for d in dests if d.name not in entry["sent"]]
             if not todo:
-                self._finalize(path, want, entry, on_success, watch, sent_dir)
                 continue
 
             for dest in todo:
@@ -156,39 +181,77 @@ class FolderWatcher:
                         kind="send",
                     )
             self.state.put(path, entry)
-            self._finalize(path, want, entry, on_success, watch, sent_dir)
 
+        # Archive/delete whole studies once all their DICOMs are fully sent —
+        # moves EVERYTHING (non-DICOM files and subfolders too) and leaves no
+        # folders behind in the outgoing tree.
+        self._archive_pass(watch, sent_dir, on_success, want)
         self.state.save()
 
-    def _finalize(self, path, want, entry, on_success, watch, sent_dir) -> None:
-        """If every enabled destination has the file, apply the on_success action."""
-        if not want.issubset(set(entry["sent"])):
+    # --------------------------------------------------------------- archiving
+    def _dicoms_under(self, entrypath: str) -> list[str]:
+        if os.path.isfile(entrypath):
+            return [entrypath] if is_dicom(entrypath) else []
+        out = []
+        for root, _dirs, files in os.walk(entrypath):
+            for f in files:
+                if f.startswith("."):
+                    continue
+                p = os.path.join(root, f)
+                if is_dicom(p):
+                    out.append(p)
+        return out
+
+    def _fully_sent(self, path: str, want: set) -> bool:
+        e = self.state.peek(path)
+        return bool(e) and want.issubset(set(e.get("sent", [])))
+
+    def _archive_pass(self, watch, sent_dir, on_success, want) -> None:
+        """After sending, for each top-level item in the outgoing folder whose
+        every DICOM has reached all enabled nodes, move/delete the WHOLE item
+        (all files & subfolders) so nothing — empty or not — is left behind."""
+        if on_success not in ("move", "delete"):
+            return  # "keep": leave everything in place
+        try:
+            names = os.listdir(watch)
+        except OSError:
             return
-        if on_success == "delete":
+        sent_abs = os.path.abspath(sent_dir)
+        for name in names:
+            if name.startswith("."):
+                continue
+            entrypath = os.path.join(watch, name)
+            ap = os.path.abspath(entrypath)
+            if ap == sent_abs or ap.startswith(sent_abs + os.sep):
+                continue  # never touch the archive itself (if nested under watch)
+            dicoms = self._dicoms_under(entrypath)
+            if not dicoms:
+                continue  # not a study (contains no DICOM) — leave it untouched
+            if not all(self._fully_sent(f, want) for f in dicoms):
+                continue  # some instance still pending/failed — retry next pass
             try:
-                os.remove(path)
-                self.state.drop(path)
-                self._sizes.pop(path, None)
-                # don't leave the now-empty Patient/Study/Series folders behind
-                prune_empty_dirs(os.path.dirname(path), watch)
-                self.log.info(f"Deleted after send: {os.path.basename(path)}", kind="send")
+                if on_success == "delete":
+                    if os.path.isdir(entrypath):
+                        shutil.rmtree(entrypath)
+                    else:
+                        os.remove(entrypath)
+                    verb = "Deleted"
+                else:
+                    rel = os.path.relpath(entrypath, watch)
+                    target = os.path.join(sent_dir, rel)
+                    if os.path.isfile(entrypath):
+                        os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
+                        shutil.move(entrypath, _dedupe(target))
+                    else:
+                        _merge_move(entrypath, target)
+                    verb = "Archived"
             except OSError as exc:
-                self.log.warn(f"Could not delete {path}: {exc}", kind="send")
-        elif on_success == "move":
-            try:
-                rel = os.path.relpath(path, watch)
-                target = os.path.join(sent_dir, rel)
-                os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
-                shutil.move(path, target)
-                self.state.drop(path)
-                self._sizes.pop(path, None)
-                # the file moved to the archive — clear the empty source folders
-                # it left in the outgoing tree
-                prune_empty_dirs(os.path.dirname(path), watch)
-                self.log.info(f"Archived after send: {rel}", kind="send")
-            except OSError as exc:
-                self.log.warn(f"Could not move {path}: {exc}", kind="send")
-        # "keep": leave in place; state already records it as fully sent.
+                self.log.warn(f"Could not {on_success} {name}: {exc}", kind="send")
+                continue
+            for f in dicoms:
+                self.state.drop(f)
+                self._sizes.pop(f, None)
+            self.log.info(f"{verb} after send: {name}", kind="send")
 
     def stats(self) -> dict:
         with self._lock:

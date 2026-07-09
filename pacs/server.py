@@ -216,6 +216,22 @@ class PacsServer:
         self.log.info("Configuration updated", kind="config")
 
     # ---- status ------------------------------------------------------------
+    @staticmethod
+    def _local_ip() -> Optional[str]:
+        """The machine's primary LAN IP (the address remote nodes would use to
+        reach this receiver), or None when there is no network route."""
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.settimeout(0.2)
+            s.connect(("8.8.8.8", 80))     # no packets sent; just resolves the source IP
+            ip = s.getsockname()[0]
+            return ip if ip and not ip.startswith("127.") else None
+        except OSError:
+            return None
+        finally:
+            s.close()
+
     def status(self) -> dict:
         scp = self.scp
         return {
@@ -242,6 +258,7 @@ class PacsServer:
             "destinations": self.cfg.destinations,
             "config_path": self.cfg.path,
             "logs_dir": self.cfg.logs_dir,
+            "host_ip": self._local_ip(),
         }
 
     def shutdown(self) -> None:

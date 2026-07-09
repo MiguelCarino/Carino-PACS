@@ -39,6 +39,11 @@ class SendState:
                 self._dirty = True
             return e
 
+    def peek(self, path: str) -> dict | None:
+        """Return the existing entry for `path` without creating one (read-only)."""
+        with self._lock:
+            return self._data.get(os.path.abspath(path))
+
     def put(self, path: str, entry: dict) -> None:
         with self._lock:
             self._data[os.path.abspath(path)] = entry

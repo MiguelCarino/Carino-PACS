@@ -116,6 +116,19 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 .log::-webkit-scrollbar { width: 9px; }
 .log::-webkit-scrollbar-thumb { background: #1c1c1c; border-radius: 6px; }
 
+/* ── Network identity banner ────────────────────────────────────── */
+.net-info {
+  font-family: var(--mono); font-size: .82rem; color: var(--muted);
+  background: linear-gradient(180deg, var(--panel), #080808);
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 12px 16px; text-align: center;
+}
+.net-info .v { color: var(--accent); font-weight: 700; }
+.net-info.offline {
+  color: var(--bad); border-color: var(--bad);
+  background: rgba(239, 68, 68, .07); font-weight: 700;
+}
+
 /* ── Three action buttons (open popups) ─────────────────────────── */
 .actions-row { display: flex; gap: 14px; }
 .btn.action {

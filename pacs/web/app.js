@@ -19,6 +19,22 @@
   /* ── Status polling ──────────────────────────────────────────── */
   function renderStatus(s) {
     const rx = s.receiver, wx = s.watcher;
+
+    // This machine's network identity (what remote nodes send to).
+    const ni = $("netInfo");
+    if (ni) {
+      ni.textContent = "";
+      if (s.host_ip) {
+        ni.classList.remove("offline");
+        const v = (t) => { const el = document.createElement("span"); el.className = "v"; el.textContent = t; return el; };
+        ni.append("Your IP is ", v(s.host_ip), " · your AE title is ", v(rx.aet),
+                  " · your port is ", v(String(rx.port)));
+      } else {
+        ni.classList.add("offline");
+        ni.textContent = "You're offline — no network detected";
+      }
+    }
+
     setDot($("rxDot"), rx.running);
     $("rxAet").textContent = rx.aet;
     $("rxAddr").textContent = `${rx.bind}:${rx.port}`;
