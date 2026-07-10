@@ -246,6 +246,7 @@ class FolderWatcher:
             "study_uid": str(getattr(hdr, "StudyInstanceUID", "") or ""),
             "study_date": str(getattr(hdr, "StudyDate", "") or ""),
             "study_desc": str(getattr(hdr, "StudyDescription", "") or ""),
+            "accession": str(getattr(hdr, "AccessionNumber", "") or ""),
         }
 
     def _siphon_pending(self, entrypath, pending_dir, dicoms, name) -> int:

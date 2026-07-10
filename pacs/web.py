@@ -158,7 +158,7 @@ def create_app(server: PacsServer) -> Flask:
         pid = d.get("id")
         if not pid:
             return jsonify(ok=False, message="missing 'id'"), 400
-        edits = {k: d.get(k) for k in ("patient", "patient_id", "study_desc", "series_desc", "study_date") if k in d}
+        edits = {k: d.get(k) for k in ("patient", "patient_id", "study_desc", "series_desc", "study_date", "accession") if k in d}
         res = server.approve_pending(pid, edits)
         return jsonify(res), (200 if res.get("ok") else 400)
 

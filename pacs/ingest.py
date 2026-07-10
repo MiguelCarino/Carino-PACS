@@ -243,6 +243,7 @@ def stage_pending(pending_dir: str, src: str, identity: dict, kind: str) -> str:
         "study_date": identity.get("study_date", ""),
         "study_desc": identity.get("study_desc", ""),
         "series_desc": identity.get("series_desc", ""),
+        "accession": identity.get("accession", ""),
         "source": identity.get("source", ""),
     }
     with open(os.path.join(entry, META_NAME), "w", encoding="utf-8") as fh:

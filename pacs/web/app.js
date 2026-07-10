@@ -457,6 +457,7 @@
       row.querySelector(".pend-preview").href = "/api/pending/preview?id=" + encodeURIComponent(it.id);
       row.querySelector(".pf-patient").value = it.patient || "";
       row.querySelector(".pf-pid").value = it.patient_id || "";
+      row.querySelector(".pf-acc").value = it.accession || "";
       row.querySelector(".pf-date").value = fmtDate(it.study_date);
       row.querySelector(".pf-sdesc").value = it.study_desc || "";
       row.querySelector(".pf-serdesc").value = it.series_desc || "";
@@ -473,6 +474,7 @@
       id: id,
       patient: row.querySelector(".pf-patient").value.trim(),
       patient_id: row.querySelector(".pf-pid").value.trim(),
+      accession: row.querySelector(".pf-acc").value.trim(),
       study_date: row.querySelector(".pf-date").value.trim(),
       study_desc: row.querySelector(".pf-sdesc").value.trim(),
       series_desc: row.querySelector(".pf-serdesc").value.trim(),
