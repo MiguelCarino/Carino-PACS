@@ -129,6 +129,16 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
   background: rgba(239, 68, 68, .07); font-weight: 700;
 }
 
+/* ── Low-disk warning banner ────────────────────────────────────── */
+.disk-warn {
+  font-family: var(--mono); font-size: .8rem; font-weight: 700;
+  color: var(--bad); border: 1px solid var(--bad); border-radius: 10px;
+  background: rgba(239, 68, 68, .07); padding: 12px 16px; text-align: center;
+}
+
+/* Amber badge variant for the ⚠ Stuck button */
+.btn.action .badge.warn { background: var(--warn); color: #050505; }
+
 /* ── Three action buttons (open popups) ─────────────────────────── */
 .actions-row { display: flex; gap: 14px; }
 .btn.action {
@@ -216,6 +226,27 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 @media (max-width: 620px) {
   .hist-row { flex-direction: column; align-items: stretch; }
   .hist-actions { justify-content: flex-end; flex-wrap: wrap; }
+}
+
+/* ── Stuck sends (failing forwards) ─────────────────────────────── */
+.stuck-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  background: var(--panel-2); border: 1px solid var(--border); border-left: 3px solid var(--warn);
+  border-radius: 10px; padding: 11px 14px;
+}
+.stuck-main { min-width: 0; flex: 1; }
+.stuck-dest { font-weight: 700; font-size: .92rem; }
+.stuck-meta { color: var(--muted); font-family: var(--mono); font-size: .72rem; margin-top: 3px; }
+.stuck-err {
+  color: var(--bad); font-family: var(--mono); font-size: .7rem; margin-top: 4px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 46ch;
+}
+.stuck-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.stuck-next { font-family: var(--mono); font-size: .7rem; color: var(--warn); white-space: nowrap; }
+@media (max-width: 620px) {
+  .stuck-row { flex-direction: column; align-items: stretch; }
+  .stuck-actions { justify-content: space-between; }
+  .stuck-err { max-width: none; }
 }
 
 /* ── Pending imports (non-DICOM review queue) ───────────────────── */

@@ -175,6 +175,17 @@ def create_app(server: PacsServer) -> Flask:
         return _cors(send_file(fp, mimetype="application/dicom",
                                as_attachment=False, download_name=os.path.basename(fp)))
 
+    # ---- stuck sends (failed / backing-off forwards) ----------------------
+    @app.get("/api/stuck")
+    def api_stuck():
+        return jsonify(server.stuck_sends())
+
+    @app.post("/api/stuck/retry")
+    def api_stuck_retry():
+        dest = (request.get_json(silent=True) or {}).get("dest") or None
+        res = server.retry_stuck(dest)
+        return jsonify(res), (200 if res.get("ok") else 400)
+
     # ---- pending imports (non-DICOM awaiting review) ----------------------
     @app.get("/api/pending")
     def api_pending():

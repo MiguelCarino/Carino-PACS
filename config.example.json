@@ -5,6 +5,7 @@
     "port": 11112,
     "storage_dir": "./received",
     "organize": true,
+    "min_free_gb": 2,
     "allowed_aets": [],
     "tls": false,
     "tls_cert": "",

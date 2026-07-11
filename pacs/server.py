@@ -43,6 +43,7 @@ class PacsServer:
                 tls_cert=self.cfg.resolve_path(s.get("tls_cert", "")),
                 tls_key=self.cfg.resolve_path(s.get("tls_key", "")),
                 tls_ca=self.cfg.resolve_path(s.get("tls_ca", "")),
+                min_free_mb=int(float(s.get("min_free_gb", 2) or 0) * 1024),
             )
             self.scp.start()
 
@@ -376,6 +377,80 @@ class PacsServer:
             found.insert(0, primary)
         return found
 
+    # ---- stuck sends (failed / backing-off forwards) ----------------------
+    def _enabled_dest_names(self) -> set:
+        return {d.get("name", "") for d in self.cfg.enabled_destinations()}
+
+    def stuck_sends(self) -> dict:
+        """Studies whose forward to an enabled destination has FAILED at least
+        once and is still outstanding, grouped per destination. Freshly-queued
+        (never-attempted) files are not 'stuck' — only ones with a recorded
+        failure. So an operator can see a node that's down and why."""
+        import time
+        want = self._enabled_dest_names()
+        per: dict = {}
+        files = 0
+        now = time.time()
+        for path, e in self.watcher.state.all_entries().items():
+            if not os.path.exists(path):
+                continue
+            sent = set(e.get("sent", []))
+            fails = e.get("fail", {}) or {}
+            stuck_here = False
+            for dname in want:
+                if dname in sent:
+                    continue
+                f = fails.get(dname)
+                if not f:
+                    continue                       # queued but not yet failed
+                stuck_here = True
+                agg = per.setdefault(dname, {"name": dname, "instances": 0,
+                                             "attempts": 0, "last_error": "", "next_try": float("inf")})
+                agg["instances"] += 1
+                agg["attempts"] = max(agg["attempts"], int(f.get("attempts", 0)))
+                agg["last_error"] = f.get("last_error", "") or agg["last_error"]
+                agg["next_try"] = min(agg["next_try"], float(f.get("next_try", 0) or 0))
+            if stuck_here:
+                files += 1
+        dests = sorted(per.values(), key=lambda x: -x["instances"])
+        for d in dests:
+            d["next_in"] = max(0, int(d.pop("next_try") - now))
+        return {"destinations": dests, "files": files}
+
+    def stuck_count(self) -> int:
+        return self.stuck_sends()["files"]
+
+    def retry_stuck(self, dest: Optional[str] = None) -> dict:
+        """Clear the retry backoff so the next watcher pass attempts immediately
+        (all stuck destinations, or just `dest`)."""
+        names = {dest} if dest else None
+        n = self.watcher.state.clear_backoff(names)
+        self.watcher.state.save()
+        if not self.watcher.running:
+            return {"ok": True, "reset": n,
+                    "message": f"Cleared backoff on {n} item(s) — start Auto-send to retry them."}
+        return {"ok": True, "reset": n, "message": f"Retrying {n} item(s) now…"}
+
+    # ---- disk headroom on the storage volume ------------------------------
+    def _disk_status(self) -> dict:
+        import shutil as _sh
+        path = self.cfg.resolved("scp", "storage_dir")
+        probe = path if os.path.isdir(path) else (os.path.dirname(path) or ".")
+        floor_gb = float(self.cfg.scp.get("min_free_gb", 2) or 0)
+        try:
+            u = _sh.disk_usage(probe)
+            free_gb = u.free / (1024 ** 3)
+            return {
+                "path": path,
+                "free_gb": round(free_gb, 1),
+                "total_gb": round(u.total / (1024 ** 3), 1),
+                "free_pct": round(100 * u.free / u.total, 1) if u.total else 0,
+                "floor_gb": floor_gb,
+                "low": bool(floor_gb > 0 and free_gb < floor_gb),
+            }
+        except OSError:
+            return {"path": path, "free_gb": None, "low": False, "floor_gb": floor_gb}
+
     def status(self) -> dict:
         from . import ingest
         scp = self.scp
@@ -389,6 +464,7 @@ class PacsServer:
                 "organize": self.cfg.scp.get("organize", True),
                 "received": scp.received_count if scp else 0,
                 "errors": scp.error_count if scp else 0,
+                "refused": scp.refused_count if scp else 0,
                 "tls": bool(self.cfg.scp.get("tls", False)),
                 "tls_mutual": bool(self.cfg.scp.get("tls", False) and self.cfg.scp.get("tls_ca", "")),
             },
@@ -406,6 +482,8 @@ class PacsServer:
             "host_ip": self._local_ip(),
             "host_ips": self._local_ips(),
             "pending": ingest.count_pending(self._pending_dir()),
+            "stuck": self.stuck_count(),
+            "disk": self._disk_status(),
             "editor_url": self.cfg.web.get("editor_url", ""),
         }
 

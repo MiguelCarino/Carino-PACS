@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import threading
 from typing import Callable, Optional
 
@@ -62,12 +63,14 @@ class StorageSCP:
         tls_cert: str = "",
         tls_key: str = "",
         tls_ca: str = "",
+        min_free_mb: int = 2048,
     ):
         self.aet = aet
         self.bind = bind
         self.port = port
         self.storage_dir = storage_dir
         self.organize = organize
+        self.min_free_mb = max(0, int(min_free_mb or 0))
         self.log = log
         self.allowed_aets = [a for a in (allowed_aets or []) if str(a).strip()]
         self.on_received = on_received
@@ -79,6 +82,26 @@ class StorageSCP:
         self._lock = threading.Lock()
         self.received_count = 0
         self.error_count = 0
+        self.refused_count = 0
+        self._warned_low = False
+
+    # ---- disk guard --------------------------------------------------------
+    def _free_mb(self) -> Optional[int]:
+        """Free megabytes on the storage volume, or None if it can't be read."""
+        try:
+            probe = self.storage_dir if os.path.isdir(self.storage_dir) else \
+                (os.path.dirname(self.storage_dir) or ".")
+            return int(shutil.disk_usage(probe).free // (1024 * 1024))
+        except OSError:
+            return None
+
+    def _space_ok(self) -> bool:
+        """True if there's room to accept another instance. Fail-open when the
+        free space can't be read (don't reject on a probe error)."""
+        if self.min_free_mb <= 0:
+            return True
+        free = self._free_mb()
+        return free is None or free >= self.min_free_mb
 
     # ---- DIMSE handlers ----------------------------------------------------
     def _handle_echo(self, event) -> int:
@@ -87,6 +110,19 @@ class StorageSCP:
         return 0x0000
 
     def _handle_store(self, event) -> int:
+        # Refuse before writing if the disk is below the safety floor — a
+        # half-written object is worse than a clean "out of resources" reject
+        # the sender can retry once space is freed.
+        if not self._space_ok():
+            with self._lock:
+                self.refused_count += 1
+            free = self._free_mb()
+            self.log.error(
+                f"Refused C-STORE — low disk space ({free} MB free < {self.min_free_mb} MB floor) "
+                f"on {self.storage_dir}",
+                kind="store",
+            )
+            return 0xA700          # Refused: Out of Resources
         try:
             ds = event.dataset
             ds.file_meta = event.file_meta

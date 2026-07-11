@@ -29,6 +29,17 @@ from .scu import Destination, c_store
 from .state import SendState
 
 
+_BACKOFF_CAP = 300.0     # never wait more than 5 min between retries
+
+
+def _backoff(attempts: int, base: float) -> float:
+    """Exponential backoff (base, 2×, 4×…) capped at _BACKOFF_CAP seconds.
+    Keeps a permanently-down node from being hammered every poll while still
+    retrying often enough that a brief outage recovers quickly."""
+    base = max(5.0, float(base or 5.0))
+    return min(_BACKOFF_CAP, base * (2 ** max(0, attempts - 1)))
+
+
 def _dedupe(target: str) -> str:
     """A non-clashing variant of *target* (adds _1, _2… before the extension)."""
     if not os.path.exists(target):
@@ -162,7 +173,14 @@ class FolderWatcher:
                 continue
 
             entry = self.state.get(path, size, mtime)
-            todo = [d for d in dests if d.name not in entry["sent"]]
+            fails = entry.setdefault("fail", {})
+            interval = float(scu.get("poll_interval", 3) or 3)
+            now = time.time()
+            # A destination is due if it hasn't accepted yet AND its backoff timer
+            # (set after the last failure) has elapsed.
+            todo = [d for d in dests
+                    if d.name not in entry["sent"]
+                    and now >= fails.get(d.name, {}).get("next_try", 0)]
             if not todo:
                 continue
 
@@ -172,15 +190,21 @@ class FolderWatcher:
                 res = c_store(dest, path, calling_aet, tls_context=tls_ctx)
                 if res.ok:
                     entry["sent"].append(dest.name)
+                    fails.pop(dest.name, None)          # clear any prior failure
                     with self._lock:
                         self.sent_count += 1
                         self.last_activity = f"{os.path.basename(path)} -> {dest.name}"
                     self.log.info(f"Sent {os.path.basename(path)} -> {dest.name}", kind="send")
                 else:
+                    f = fails.setdefault(dest.name, {"attempts": 0})
+                    f["attempts"] += 1
+                    f["last_error"] = res.message
+                    f["next_try"] = time.time() + _backoff(f["attempts"], interval)
                     with self._lock:
                         self.failed_count += 1
                     self.log.warn(
-                        f"Send {os.path.basename(path)} -> {dest.name}: {res.message}",
+                        f"Send {os.path.basename(path)} -> {dest.name}: {res.message} "
+                        f"(attempt {f['attempts']}, retry in {int(f['next_try'] - time.time())}s)",
                         kind="send",
                     )
             self.state.put(path, entry)

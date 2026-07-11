@@ -50,12 +50,16 @@
     <!-- ── This machine's network identity ──────────────────────────── -->
     <div class="net-info" id="netInfo">Checking network…</div>
 
+    <!-- ── Low-disk warning (hidden unless the storage volume is low) ── -->
+    <div class="disk-warn" id="diskWarn" hidden></div>
+
     <!-- ── Action buttons open their own popup windows ───────────────── -->
     <section class="actions-row">
       <button class="btn action" id="openSettings">⚙ Settings</button>
       <button class="btn action" id="openDests">🌐 Destinations</button>
       <button class="btn action" id="openHistory">🗂 History</button>
       <button class="btn action" id="openPending">📎 Pending<span class="badge" id="pendingBadge" hidden>0</span></button>
+      <button class="btn action" id="openStuck">⚠ Stuck<span class="badge warn" id="stuckBadge" hidden>0</span></button>
       <button class="btn action" id="openLogs">📋 Logs</button>
     </section>
   </main>
@@ -173,6 +177,26 @@
     </div>
   </dialog>
 
+  <!-- ── Stuck sends popup ─────────────────────────────────────────── -->
+  <dialog class="modal" id="dlgStuck">
+    <div class="modal-inner">
+      <header class="modal-head">
+        <h2>Stuck sends <small>forwards that failed and are retrying</small></h2>
+        <button class="modal-x" data-close aria-label="Close">✕</button>
+      </header>
+      <div class="modal-body">
+        <div class="hist-bar">
+          <p class="hint" style="margin:0;max-width:60ch">Studies keep retrying with backoff until every enabled destination accepts them — nothing is dropped. Fix the node, then <em>Retry now</em> to attempt immediately.</p>
+          <div class="hist-tools">
+            <button class="btn tiny" id="stuckRetryAll" title="Clear backoff on all stuck sends">↻ Retry all now</button>
+            <button class="btn ghost tiny" id="stuckRefresh" title="Refresh">↻ Refresh</button>
+          </div>
+        </div>
+        <div class="hist-list" id="stuckList"></div>
+      </div>
+    </div>
+  </dialog>
+
   <!-- ── Logs popup ────────────────────────────────────────────────── -->
   <dialog class="modal" id="dlgLogs">
     <div class="modal-inner">
@@ -206,6 +230,21 @@
         <button class="btn tiny ghost hist-edit" title="Open this study in DICOM-editor" hidden>✎ Edit tags</button>
         <button class="btn tiny ghost hist-open" title="Open the folder on disk">Go to file</button>
         <button class="btn tiny danger hist-del" title="Delete from disk">Delete</button>
+      </div>
+    </div>
+  </template>
+
+  <!-- Row template for a stuck destination (failing forward) -->
+  <template id="stuckRowTpl">
+    <div class="stuck-row">
+      <div class="stuck-main">
+        <div class="stuck-dest"></div>
+        <div class="stuck-meta"></div>
+        <div class="stuck-err"></div>
+      </div>
+      <div class="stuck-actions">
+        <span class="stuck-next"></span>
+        <button class="btn tiny stuck-retry" title="Clear backoff and retry this destination now">Retry now</button>
       </div>
     </div>
   </template>

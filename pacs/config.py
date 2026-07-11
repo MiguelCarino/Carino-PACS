@@ -26,6 +26,7 @@ DEFAULTS: dict[str, Any] = {
         "port": 11112,
         "storage_dir": "./received",
         "organize": True,
+        "min_free_gb": 2,       # refuse C-STORE when the storage volume drops below this (0 = off)
         "allowed_aets": [],
         "tls": False,           # serve DICOM over TLS
         "tls_cert": "",         # server certificate (PEM)

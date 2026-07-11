@@ -50,6 +50,27 @@
       badge.hidden = n === 0;
     }
 
+    // Stuck-sends badge on the ⚠ button.
+    const sBadge = $("stuckBadge");
+    if (sBadge) {
+      const n = s.stuck || 0;
+      sBadge.textContent = String(n);
+      sBadge.hidden = n === 0;
+    }
+
+    // Low-disk warning banner (only when the storage volume is below the floor).
+    const dw = $("diskWarn");
+    if (dw) {
+      const d = s.disk || {};
+      if (d.low) {
+        dw.hidden = false;
+        dw.textContent = "⚠ Low disk space — " + (d.free_gb != null ? d.free_gb + " GB" : "?") +
+          " free (below the " + d.floor_gb + " GB floor). New incoming studies will be refused until space is freed.";
+      } else {
+        dw.hidden = true;
+      }
+    }
+
     setDot($("rxDot"), rx.running);
     $("rxAet").textContent = rx.aet;
     $("rxAddr").textContent = `${rx.bind}:${rx.port}`;
@@ -452,6 +473,60 @@
     return (s.length === 8 && /^\d+$/.test(s)) ? s.slice(0, 4) + "-" + s.slice(4, 6) + "-" + s.slice(6, 8) : s;
   }
 
+  function fmtWait(secs) {
+    const n = Math.max(0, Number(secs) || 0);
+    if (n <= 0) return "due now";
+    if (n < 60) return "retry in " + n + "s";
+    if (n < 3600) return "retry in " + Math.round(n / 60) + "m";
+    return "retry in " + Math.round(n / 3600) + "h";
+  }
+
+  async function loadStuck() {
+    const list = $("stuckList");
+    list.innerHTML = "<div class='hist-empty'>Loading…</div>";
+    try {
+      const data = await api("/api/stuck");
+      renderStuck(data.destinations || []);
+    } catch (e) {
+      list.innerHTML = "<div class='hist-empty'>Could not load: " + e.message + "</div>";
+    }
+  }
+
+  function renderStuck(dests) {
+    const list = $("stuckList");
+    list.innerHTML = "";
+    if (!dests.length) {
+      list.innerHTML = "<div class='hist-empty'>Nothing stuck — every forward is up to date.</div>";
+      return;
+    }
+    dests.forEach((d) => {
+      const row = $("stuckRowTpl").content.cloneNode(true).querySelector(".stuck-row");
+      row.querySelector(".stuck-dest").textContent = d.name || "(destination)";
+      row.querySelector(".stuck-meta").textContent =
+        d.instances + (d.instances === 1 ? " instance" : " instances") + " waiting  ·  " +
+        d.attempts + (d.attempts === 1 ? " attempt" : " attempts");
+      row.querySelector(".stuck-err").textContent = d.last_error ? ("last error: " + d.last_error) : "";
+      row.querySelector(".stuck-next").textContent = fmtWait(d.next_in);
+      const btn = row.querySelector(".stuck-retry");
+      btn.addEventListener("click", () => retryStuck(d.name, btn));
+      list.appendChild(row);
+    });
+  }
+
+  async function retryStuck(dest, btn) {
+    const old = btn && btn.textContent;
+    if (btn) { btn.disabled = true; btn.textContent = "…"; }
+    try {
+      const r = await post("/api/stuck/retry", dest ? { dest } : {});
+      flashNote(r.message || "Retrying…", r.ok !== false);
+      loadStuck();
+      pollStatus();
+    } catch (e) {
+      flashNote(e.message, false);
+      if (btn) { btn.disabled = false; btn.textContent = old; }
+    }
+  }
+
   async function loadPending() {
     const list = $("pendingList");
     list.innerHTML = "<div class='hist-empty'>Loading…</div>";
@@ -567,6 +642,14 @@
       loadPending();
     });
     $("pendRefresh").addEventListener("click", loadPending);
+
+    // Stuck-sends popup: open + load, refresh, retry-all.
+    $("openStuck").addEventListener("click", () => {
+      const d = $("dlgStuck"); if (d && !d.open) d.showModal();
+      loadStuck();
+    });
+    $("stuckRefresh").addEventListener("click", loadStuck);
+    $("stuckRetryAll").addEventListener("click", () => retryStuck(null, $("stuckRetryAll")));
 
     loadConfig().catch((e) => flashNote("Load failed: " + e.message, false));
     pollStatus();

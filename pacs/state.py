@@ -54,6 +54,33 @@ class SendState:
             if self._data.pop(os.path.abspath(path), None) is not None:
                 self._dirty = True
 
+    def all_entries(self) -> dict:
+        """A shallow copy of every (path -> entry) pair, for read-only scans
+        (the 'stuck sends' view). Entries are copied so callers can't mutate
+        state without going through put()."""
+        import copy
+        with self._lock:
+            return {k: copy.deepcopy(v) for k, v in self._data.items()}
+
+    def clear_backoff(self, dest_names=None) -> int:
+        """Zero the retry-backoff timer on failing destinations so the next
+        watcher pass attempts them immediately. `dest_names` limits it to those
+        destinations (None = all). Returns how many files were nudged."""
+        touched = 0
+        with self._lock:
+            for e in self._data.values():
+                fails = e.get("fail") or {}
+                hit = False
+                for name, f in fails.items():
+                    if dest_names is None or name in dest_names:
+                        if f.get("next_try", 0):
+                            f["next_try"] = 0
+                            hit = True
+                if hit:
+                    touched += 1
+                    self._dirty = True
+        return touched
+
     def save(self) -> None:
         with self._lock:
             if not self._dirty:
