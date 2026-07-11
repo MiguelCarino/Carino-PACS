@@ -37,7 +37,7 @@
   "web": {
     "host": "127.0.0.1",
     "port": 8042,
-    "editor_url": ""
+    "editor_url": "/editor/"
   },
   "logs_dir": "./logs"
 }

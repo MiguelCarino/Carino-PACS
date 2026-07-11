@@ -12,7 +12,7 @@ import sys
 import threading
 import time
 
-from flask import Flask, jsonify, request, send_file, send_from_directory
+from flask import Flask, jsonify, redirect, request, send_file, send_from_directory
 
 from . import APP_NAME, __version__
 from .server import PacsServer
@@ -31,6 +31,18 @@ def create_app(server: PacsServer) -> Flask:
     @app.get("/")
     def index():
         return send_from_directory(WEB_DIR, "index.html")
+
+    # Bundled DICOM-editor (served same-origin so the ✎ Edit deep-link needs no
+    # CORS / mixed-content / PNA gymnastics). Sub-assets fall through to the
+    # catch-all below; only the trailing-slash index needs its own route so the
+    # editor's relative <script> paths resolve under /editor/.
+    @app.get("/editor")
+    def editor_redirect():
+        return redirect("/editor/", code=301)
+
+    @app.get("/editor/")
+    def editor_index():
+        return send_from_directory(os.path.join(WEB_DIR, "editor"), "index.html")
 
     @app.get("/<path:filename>")
     def static_files(filename):
@@ -148,15 +160,31 @@ def create_app(server: PacsServer) -> Flask:
         return jsonify(res), (200 if res.get("ok") else 400)
 
     # ---- DICOM-editor deep-link (CORS-open, GET-only) ---------------------
-    # The editor is a separate origin (and often file://), so these two GET
-    # endpoints allow cross-origin reads. Consistent with the dashboard's
+    # The editor is a separate origin (a public HTTPS site like
+    # dicom.carino.systems, or file://), so these two GET endpoints allow
+    # cross-origin reads. When the editor is a PUBLIC page fetching this
+    # (private/localhost) PACS, Chrome's Private Network Access sends a CORS
+    # preflight expecting `Access-Control-Allow-Private-Network: true`, so we
+    # answer OPTIONS and echo that header. Consistent with the dashboard's
     # localhost-only, no-auth posture; nothing here mutates state.
     def _cors(resp):
         resp.headers["Access-Control-Allow-Origin"] = "*"
+        resp.headers["Access-Control-Allow-Private-Network"] = "true"
         return resp
 
-    @app.get("/api/studies/files")
+    def _preflight():
+        resp = app.make_default_options_response()
+        resp.headers["Access-Control-Allow-Origin"] = "*"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+        resp.headers["Access-Control-Allow-Headers"] = "*"
+        resp.headers["Access-Control-Allow-Private-Network"] = "true"
+        resp.headers["Access-Control-Max-Age"] = "600"
+        return resp
+
+    @app.route("/api/studies/files", methods=["GET", "OPTIONS"])
     def api_studies_files():
+        if request.method == "OPTIONS":
+            return _preflight()
         group = request.args.get("group", "received")
         path = request.args.get("path")
         if not path:
@@ -164,8 +192,10 @@ def create_app(server: PacsServer) -> Flask:
         res = server.study_dicom_files(group, path)
         return _cors(jsonify(res)), (200 if res.get("ok") else 400)
 
-    @app.get("/api/studies/file")
+    @app.route("/api/studies/file", methods=["GET", "OPTIONS"])
     def api_studies_file():
+        if request.method == "OPTIONS":
+            return _preflight()
         group = request.args.get("group", "received")
         path = request.args.get("path", "")
         name = request.args.get("name", "")

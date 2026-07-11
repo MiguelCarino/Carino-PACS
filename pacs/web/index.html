@@ -53,167 +53,171 @@
     <!-- ── Low-disk warning (hidden unless the storage volume is low) ── -->
     <div class="disk-warn" id="diskWarn" hidden></div>
 
-    <!-- ── Action buttons open their own popup windows ───────────────── -->
-    <section class="actions-row">
-      <button class="btn action" id="openSettings">⚙ Settings</button>
-      <button class="btn action" id="openDests">🌐 Destinations</button>
-      <button class="btn action" id="openHistory">🗂 History</button>
-      <button class="btn action" id="openPending">📎 Pending<span class="badge" id="pendingBadge" hidden>0</span></button>
-      <button class="btn action" id="openStuck">⚠ Stuck<span class="badge warn" id="stuckBadge" hidden>0</span></button>
-      <button class="btn action" id="openLogs">📋 Logs</button>
-    </section>
+    <!-- ── Tab strip: each button reveals its panel in the workspace ── -->
+    <nav class="actions-row" id="tabStrip">
+      <button class="btn action tabbtn active" id="openHistory" data-panel="dlgHistory">🗂 History</button>
+      <button class="btn action tabbtn" id="openPending" data-panel="dlgPending">📎 Pending<span class="badge" id="pendingBadge" hidden>0</span></button>
+      <button class="btn action tabbtn" id="openStuck" data-panel="dlgStuck">⚠ Stuck<span class="badge warn" id="stuckBadge" hidden>0</span></button>
+      <button class="btn action tabbtn" id="openDests" data-panel="dlgDests">🌐 Destinations</button>
+      <button class="btn action tabbtn" id="openSettings" data-panel="dlgSettings">⚙ Settings</button>
+      <button class="btn action tabbtn" id="openLogs" data-panel="dlgLogs">📋 Logs</button>
+    </nav>
+
+    <!-- ── Workspace: the selected tab's content renders inline here ── -->
+    <div id="workspace">
+
+      <!-- History (default) -->
+      <section class="panel workpanel" id="dlgHistory">
+        <header class="modal-head">
+          <h2>Transaction history <small>received &amp; sent studies</small></h2>
+          <button class="modal-x" data-demote aria-label="Close">✕</button>
+        </header>
+        <div class="modal-body">
+          <div class="hist-bar">
+            <div class="hist-tabs">
+              <button class="hist-tab active" data-group="received">📥 Received</button>
+              <button class="hist-tab" data-group="sent">📤 Sent / Archived</button>
+            </div>
+            <div class="hist-tools">
+              <button class="btn ghost tiny" id="histRefresh" title="Rescan folder">↻ Refresh</button>
+              <button class="btn tiny danger" id="histDeleteAll">🗑 Delete all</button>
+            </div>
+          </div>
+          <div class="hist-list" id="histList"></div>
+        </div>
+      </section>
+
+      <!-- Pending imports -->
+      <section class="panel workpanel" id="dlgPending" hidden>
+        <header class="modal-head">
+          <h2>Pending imports <small>non-DICOM awaiting review</small></h2>
+          <button class="modal-x" data-demote aria-label="Close">✕</button>
+        </header>
+        <div class="modal-body">
+          <div class="hist-bar">
+            <p class="hint" style="margin:0;max-width:60ch">PDFs &amp; images found beside a study are queued here with the study's details pre-filled. Confirm, then <em>Approve</em> to convert them to DICOM and send.</p>
+            <div class="hist-tools">
+              <button class="btn ghost tiny" id="pendRefresh" title="Rescan the pending folder">↻ Refresh</button>
+            </div>
+          </div>
+          <div class="hist-list" id="pendingList"></div>
+        </div>
+      </section>
+
+      <!-- Stuck sends -->
+      <section class="panel workpanel" id="dlgStuck" hidden>
+        <header class="modal-head">
+          <h2>Stuck sends <small>forwards that failed and are retrying</small></h2>
+          <button class="modal-x" data-demote aria-label="Close">✕</button>
+        </header>
+        <div class="modal-body">
+          <div class="hist-bar">
+            <p class="hint" style="margin:0;max-width:60ch">Studies keep retrying with backoff until every enabled destination accepts them — nothing is dropped. Fix the node, then <em>Retry now</em> to attempt immediately.</p>
+            <div class="hist-tools">
+              <button class="btn tiny" id="stuckRetryAll" title="Clear backoff on all stuck sends">↻ Retry all now</button>
+              <button class="btn ghost tiny" id="stuckRefresh" title="Refresh">↻ Refresh</button>
+            </div>
+          </div>
+          <div class="hist-list" id="stuckList"></div>
+        </div>
+      </section>
+
+      <!-- Destinations -->
+      <section class="panel workpanel" id="dlgDests" hidden>
+        <header class="modal-head">
+          <h2>Destinations <small>remote DICOM nodes</small></h2>
+          <button class="modal-x" data-demote aria-label="Close">✕</button>
+        </header>
+        <div class="modal-body">
+          <div class="table-scroll">
+            <table class="grid" id="destTable">
+              <thead>
+                <tr><th>On</th><th>Name</th><th>Host</th><th>Port</th><th>AE title</th><th>TLS</th><th></th></tr>
+              </thead>
+              <tbody id="destBody"></tbody>
+            </table>
+          </div>
+          <p class="hint">New files in the watched folder are forwarded to every <em>enabled</em> node, retried until each accepts. Tick <em>TLS</em> to connect to a node over DICOM-TLS — the client cert/CA come from the Auto-send settings.</p>
+        </div>
+        <footer class="modal-foot">
+          <button class="btn ghost" id="addDest">+ Add node</button>
+          <button class="btn" id="saveDests">Save destinations</button>
+        </footer>
+      </section>
+
+      <!-- Settings -->
+      <section class="panel workpanel" id="dlgSettings" hidden>
+        <header class="modal-head"><h2>Settings</h2><button class="modal-x" data-demote aria-label="Close">✕</button></header>
+        <div class="modal-body">
+          <div class="settings">
+            <fieldset>
+              <legend>Receiver (SCP)</legend>
+              <label>AE title <input id="scpAet" maxlength="16" /></label>
+              <label>Bind address <input id="scpBind" /></label>
+              <label>Port <input id="scpPort" type="number" min="1" max="65535" /></label>
+              <label>Storage folder <input id="scpDir" /></label>
+              <label class="check"><input id="scpOrganize" type="checkbox" /> Organize by Patient / Study / Series</label>
+              <label>Refuse when free space below (GB) <input id="scpMinFree" type="number" min="0" step="1" placeholder="0 = off" /></label>
+              <label>Accept only these AEs <input id="scpAllowed" placeholder="comma-separated, blank = any" /></label>
+              <label class="check"><input id="scpTls" type="checkbox" /> Serve DICOM over TLS</label>
+              <label>TLS certificate (PEM) <input id="scpTlsCert" placeholder="path to server.crt" /></label>
+              <label>TLS private key (PEM) <input id="scpTlsKey" placeholder="path to server.key" /></label>
+              <label>Client-cert CA — mutual TLS <input id="scpTlsCa" placeholder="blank = don't require client certs" /></label>
+            </fieldset>
+            <fieldset>
+              <legend>Auto-send (SCU)</legend>
+              <label>Calling AE title <input id="scuAet" maxlength="16" /></label>
+              <label>Watch folder <input id="scuDir" /></label>
+              <label>Poll interval (s) <input id="scuPoll" type="number" min="1" step="1" /></label>
+              <label>After a file is sent
+                <select id="scuMode">
+                  <option value="keep">Keep it in place</option>
+                  <option value="move">Move to archive folder</option>
+                  <option value="delete">Delete it</option>
+                </select>
+              </label>
+              <label>Archive folder <input id="scuSent" /></label>
+              <label class="check"><input id="scuTlsVerify" type="checkbox" /> Verify remote TLS certificate</label>
+              <label>Trusted CA bundle <input id="scuTlsCa" placeholder="blank = system trust store" /></label>
+              <label>Client certificate (PEM) <input id="scuTlsCert" placeholder="optional — for mutual TLS" /></label>
+              <label>Client private key (PEM) <input id="scuTlsKey" placeholder="optional" /></label>
+            </fieldset>
+            <fieldset>
+              <legend>Integrations</legend>
+              <label>DICOM-editor URL
+                <input id="webEditorUrl" placeholder="e.g. http://localhost:8080/  (blank = hide ✎ Edit)" />
+              </label>
+              <p class="hint" style="margin:2px 0 0">Set this to where you serve <em>DICOM-editor</em>. When filled, each study in History gets an <em>✎ Edit tags</em> button that opens the study straight in the editor.</p>
+            </fieldset>
+          </div>
+        </div>
+        <footer class="modal-foot">
+          <button class="btn kill" id="killSvc" title="Stop the receiver, watcher and the whole engine process">⏻ Shut down service</button>
+          <button class="btn" id="saveCfg">Save configuration</button>
+        </footer>
+      </section>
+
+      <!-- Logs -->
+      <section class="panel workpanel" id="dlgLogs" hidden>
+        <header class="modal-head">
+          <h2>Activity</h2>
+          <div class="head-right">
+            <button class="btn ghost tiny" id="clearLog">Clear view</button>
+            <button class="modal-x" data-demote aria-label="Close">✕</button>
+          </div>
+        </header>
+        <div class="modal-body">
+          <div class="log" id="log"></div>
+        </div>
+      </section>
+
+    </div>
   </main>
 
-  <!-- ── Settings popup ────────────────────────────────────────────── -->
-  <dialog class="modal" id="dlgSettings">
-    <div class="modal-inner">
-      <header class="modal-head"><h2>Settings</h2><button class="modal-x" data-close aria-label="Close">✕</button></header>
-      <div class="modal-body">
-        <div class="settings">
-          <fieldset>
-            <legend>Receiver (SCP)</legend>
-            <label>AE title <input id="scpAet" maxlength="16" /></label>
-            <label>Bind address <input id="scpBind" /></label>
-            <label>Port <input id="scpPort" type="number" min="1" max="65535" /></label>
-            <label>Storage folder <input id="scpDir" /></label>
-            <label class="check"><input id="scpOrganize" type="checkbox" /> Organize by Patient / Study / Series</label>
-            <label>Accept only these AEs <input id="scpAllowed" placeholder="comma-separated, blank = any" /></label>
-            <label class="check"><input id="scpTls" type="checkbox" /> Serve DICOM over TLS</label>
-            <label>TLS certificate (PEM) <input id="scpTlsCert" placeholder="path to server.crt" /></label>
-            <label>TLS private key (PEM) <input id="scpTlsKey" placeholder="path to server.key" /></label>
-            <label>Client-cert CA — mutual TLS <input id="scpTlsCa" placeholder="blank = don't require client certs" /></label>
-          </fieldset>
-          <fieldset>
-            <legend>Auto-send (SCU)</legend>
-            <label>Calling AE title <input id="scuAet" maxlength="16" /></label>
-            <label>Watch folder <input id="scuDir" /></label>
-            <label>Poll interval (s) <input id="scuPoll" type="number" min="1" step="1" /></label>
-            <label>After a file is sent
-              <select id="scuMode">
-                <option value="keep">Keep it in place</option>
-                <option value="move">Move to archive folder</option>
-                <option value="delete">Delete it</option>
-              </select>
-            </label>
-            <label>Archive folder <input id="scuSent" /></label>
-            <label class="check"><input id="scuTlsVerify" type="checkbox" /> Verify remote TLS certificate</label>
-            <label>Trusted CA bundle <input id="scuTlsCa" placeholder="blank = system trust store" /></label>
-            <label>Client certificate (PEM) <input id="scuTlsCert" placeholder="optional — for mutual TLS" /></label>
-            <label>Client private key (PEM) <input id="scuTlsKey" placeholder="optional" /></label>
-          </fieldset>
-        </div>
-      </div>
-      <footer class="modal-foot">
-        <button class="btn kill" id="killSvc" title="Stop the receiver, watcher and the whole engine process">⏻ Shut down service</button>
-        <button class="btn" id="saveCfg">Save configuration</button>
-      </footer>
-    </div>
-  </dialog>
+  <!-- backdrop shown behind a popped-out (overflowing) panel or Settings -->
+  <div id="panelBackdrop" hidden></div>
 
-  <!-- ── Destinations popup ────────────────────────────────────────── -->
-  <dialog class="modal" id="dlgDests">
-    <div class="modal-inner">
-      <header class="modal-head">
-        <h2>Destinations <small>remote DICOM nodes</small></h2>
-        <button class="modal-x" data-close aria-label="Close">✕</button>
-      </header>
-      <div class="modal-body">
-        <div class="table-scroll">
-          <table class="grid" id="destTable">
-            <thead>
-              <tr><th>On</th><th>Name</th><th>Host</th><th>Port</th><th>AE title</th><th>TLS</th><th></th></tr>
-            </thead>
-            <tbody id="destBody"></tbody>
-          </table>
-        </div>
-        <p class="hint">New files in the watched folder are forwarded to every <em>enabled</em> node, retried until each accepts. Tick <em>TLS</em> to connect to a node over DICOM-TLS — the client cert/CA come from the Auto-send settings.</p>
-      </div>
-      <footer class="modal-foot">
-        <button class="btn ghost" id="addDest">+ Add node</button>
-        <button class="btn" id="saveDests">Save destinations</button>
-      </footer>
-    </div>
-  </dialog>
-
-  <!-- ── Transaction history popup ─────────────────────────────────── -->
-  <dialog class="modal" id="dlgHistory">
-    <div class="modal-inner">
-      <header class="modal-head">
-        <h2>Transaction history <small>received &amp; sent studies</small></h2>
-        <button class="modal-x" data-close aria-label="Close">✕</button>
-      </header>
-      <div class="modal-body">
-        <div class="hist-bar">
-          <div class="hist-tabs">
-            <button class="hist-tab active" data-group="received">📥 Received</button>
-            <button class="hist-tab" data-group="sent">📤 Sent / Archived</button>
-          </div>
-          <div class="hist-tools">
-            <button class="btn ghost tiny" id="histRefresh" title="Rescan folder">↻ Refresh</button>
-            <button class="btn tiny danger" id="histDeleteAll">🗑 Delete all</button>
-          </div>
-        </div>
-        <div class="hist-list" id="histList"></div>
-      </div>
-    </div>
-  </dialog>
-
-  <!-- ── Pending imports popup ─────────────────────────────────────── -->
-  <dialog class="modal" id="dlgPending">
-    <div class="modal-inner">
-      <header class="modal-head">
-        <h2>Pending imports <small>non-DICOM awaiting review</small></h2>
-        <button class="modal-x" data-close aria-label="Close">✕</button>
-      </header>
-      <div class="modal-body">
-        <div class="hist-bar">
-          <p class="hint" style="margin:0;max-width:60ch">PDFs &amp; images found beside a study are queued here with the study's details pre-filled. Confirm, then <em>Approve</em> to convert them to DICOM and send.</p>
-          <div class="hist-tools">
-            <button class="btn ghost tiny" id="pendRefresh" title="Rescan the pending folder">↻ Refresh</button>
-          </div>
-        </div>
-        <div class="hist-list" id="pendingList"></div>
-      </div>
-    </div>
-  </dialog>
-
-  <!-- ── Stuck sends popup ─────────────────────────────────────────── -->
-  <dialog class="modal" id="dlgStuck">
-    <div class="modal-inner">
-      <header class="modal-head">
-        <h2>Stuck sends <small>forwards that failed and are retrying</small></h2>
-        <button class="modal-x" data-close aria-label="Close">✕</button>
-      </header>
-      <div class="modal-body">
-        <div class="hist-bar">
-          <p class="hint" style="margin:0;max-width:60ch">Studies keep retrying with backoff until every enabled destination accepts them — nothing is dropped. Fix the node, then <em>Retry now</em> to attempt immediately.</p>
-          <div class="hist-tools">
-            <button class="btn tiny" id="stuckRetryAll" title="Clear backoff on all stuck sends">↻ Retry all now</button>
-            <button class="btn ghost tiny" id="stuckRefresh" title="Refresh">↻ Refresh</button>
-          </div>
-        </div>
-        <div class="hist-list" id="stuckList"></div>
-      </div>
-    </div>
-  </dialog>
-
-  <!-- ── Logs popup ────────────────────────────────────────────────── -->
-  <dialog class="modal" id="dlgLogs">
-    <div class="modal-inner">
-      <header class="modal-head">
-        <h2>Activity</h2>
-        <div>
-          <button class="btn ghost" id="clearLog">Clear view</button>
-          <button class="modal-x" data-close aria-label="Close">✕</button>
-        </div>
-      </header>
-      <div class="modal-body">
-        <div class="log" id="log"></div>
-      </div>
-    </div>
-  </dialog>
-
-  <!-- global toast (visible regardless of which popup is open) -->
+  <!-- global toast -->
   <div class="toast" id="toast" hidden></div>
 
   <!-- Row template for a study in the history list -->

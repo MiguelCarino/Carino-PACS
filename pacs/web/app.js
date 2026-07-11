@@ -13,7 +13,11 @@
   const post = (url, data) =>
     api(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data || {}) });
 
-  let loadedWeb = { host: "127.0.0.1", port: 8042 }; // preserved across saves
+  // Full loaded config sections — kept so a Save preserves any key that has no
+  // form input (min_free_gb, pending_dir, …); apply_config merges over DEFAULTS,
+  // so an omitted key would otherwise silently reset.
+  let loadedScp = {}, loadedScu = {};
+  let loadedWeb = { host: "127.0.0.1", port: 8042 };
   let statusTimer = null, logTimer = null;
   let editorUrl = "";                                // DICOM-editor base URL (from status); "" hides ✎ Edit
 
@@ -144,12 +148,16 @@
   /* ── Config load / populate ──────────────────────────────────── */
   async function loadConfig() {
     const c = await api("/api/config");
+    loadedScp = c.scp || {};
+    loadedScu = c.scu || {};
     loadedWeb = c.web || loadedWeb;
+    $("webEditorUrl").value = (c.web && c.web.editor_url) || "";
     $("scpAet").value = c.scp.aet;
     $("scpBind").value = c.scp.bind;
     $("scpPort").value = c.scp.port;
     $("scpDir").value = c.scp.storage_dir;
     $("scpOrganize").checked = !!c.scp.organize;
+    $("scpMinFree").value = c.scp.min_free_gb != null ? c.scp.min_free_gb : 2;
     $("scpAllowed").value = (c.scp.allowed_aets || []).join(", ");
     $("scpTls").checked = !!c.scp.tls;
     $("scpTlsCert").value = c.scp.tls_cert || "";
@@ -165,6 +173,7 @@
     $("scuTlsCert").value = c.scu.tls_cert || "";
     $("scuTlsKey").value = c.scu.tls_key || "";
     renderDests(c.destinations || []);
+    reflowActive();
   }
 
   function renderDests(list) {
@@ -201,13 +210,17 @@
 
   function collectConfig() {
     const allowed = $("scpAllowed").value.split(",").map((s) => s.trim()).filter(Boolean);
+    // Spread the loaded section first so keys without a form input (min_free_gb,
+    // pending_dir, …) survive; the form fields below override the visible ones.
     return {
       scp: {
+        ...loadedScp,
         aet: $("scpAet").value.trim(),
         bind: $("scpBind").value.trim() || "0.0.0.0",
         port: parseInt($("scpPort").value, 10),
         storage_dir: $("scpDir").value.trim(),
         organize: $("scpOrganize").checked,
+        min_free_gb: parseFloat($("scpMinFree").value) || 0,
         allowed_aets: allowed,
         tls: $("scpTls").checked,
         tls_cert: $("scpTlsCert").value.trim(),
@@ -215,6 +228,7 @@
         tls_ca: $("scpTlsCa").value.trim(),
       },
       scu: {
+        ...loadedScu,
         aet: $("scuAet").value.trim(),
         watch_dir: $("scuDir").value.trim(),
         poll_interval: parseFloat($("scuPoll").value) || 3,
@@ -226,7 +240,7 @@
         tls_key: $("scuTlsKey").value.trim(),
       },
       destinations: collectDests(),
-      web: loadedWeb,
+      web: { ...loadedWeb, editor_url: $("webEditorUrl").value.trim() },
     };
   }
 
@@ -251,12 +265,6 @@
 
   function flashNote(msg, ok) {
     const t = $("toast");
-    // A modal <dialog> renders in the browser "top layer", above every normal
-    // element (even z-index:max). Re-parent the toast into the open dialog so
-    // notifications show ON TOP of the popup instead of hidden behind it.
-    const openDlgs = document.querySelectorAll("dialog[open]");
-    const host = openDlgs.length ? openDlgs[openDlgs.length - 1] : document.body;
-    if (t.parentNode !== host) host.appendChild(t);
     t.textContent = msg;
     t.className = "toast " + (ok ? "ok" : "bad");
     t.hidden = false;
@@ -330,7 +338,6 @@
     if (logTimer) clearInterval(logTimer);
     setDot($("rxDot"), false);
     setDot($("wxDot"), false);
-    document.querySelectorAll(".modal").forEach((d) => { if (d.open) d.close(); });
     const ov = document.createElement("div");
     ov.className = "stopped-overlay";
     ov.innerHTML = "<div><h2>Carino PACS has shut down</h2>" +
@@ -347,6 +354,7 @@
     try {
       const data = await api("/api/studies?group=" + histGroup);
       renderHistory(data.studies || []);
+      reflowActive();
     } catch (e) {
       list.innerHTML = "<div class='hist-empty'>Could not load: " + e.message + "</div>";
     }
@@ -435,14 +443,44 @@
     } catch (e) { flashNote(e.message, false); }
   }
 
-  // Open a study in DICOM-editor via deep-link. We hand the editor a manifest
-  // URL (absolute, this dashboard's origin); it fetches each DICOM and loads it.
+  // Open a study in DICOM-editor via a postMessage BRIDGE. A remote HTTPS
+  // editor cannot fetch our http://localhost API (mixed content — hard-blocked
+  // in Safari), so instead WE fetch the DICOM from our own origin (http→http,
+  // fine) and hand the bytes to the editor window via postMessage, which is not
+  // subject to mixed-content rules. Works in every browser.
   function histEdit(s) {
     if (!editorUrl) return;
-    const manifest = location.origin + "/api/studies/files?group=" +
-      encodeURIComponent(histGroup) + "&path=" + encodeURIComponent(s.path);
-    const sep = editorUrl.includes("#") ? "&" : "#";
-    window.open(editorUrl + sep + "load=" + encodeURIComponent(manifest), "_blank", "noopener");
+    // Resolve relative ("/editor/" = the bundled same-origin editor) or absolute URLs alike.
+    let editorAbs, editorOrigin;
+    try { const u = new URL(editorUrl, location.origin); editorAbs = u.href; editorOrigin = u.origin; }
+    catch (e) { flashNote("Editor URL is not valid", false); return; }
+    const manifestUrl = "/api/studies/files?group=" + encodeURIComponent(histGroup) + "&path=" + encodeURIComponent(s.path);
+    const sep = editorAbs.includes("#") ? "&" : "#";
+    const win = window.open(editorAbs + sep + "carino-bridge", "_blank");   // NOT noopener — we need window.opener on the editor side
+    if (!win) { flashNote("Pop-up blocked — allow pop-ups to open the editor", false); return; }
+    let done = false;
+    async function onMsg(ev) {
+      if (ev.source !== win || !ev.data || ev.data.type !== "carino-pacs-ready" || done) return;
+      done = true;
+      window.removeEventListener("message", onMsg);
+      try {
+        const man = await api(manifestUrl);                 // same-origin fetch (http→http)
+        const entries = man.files || [];
+        if (!entries.length) throw new Error(man.message || "no DICOM files in study");
+        const files = [];
+        for (const e of entries) {
+          const r = await fetch(e.url);
+          if (r.ok) files.push({ name: e.name, buf: await r.arrayBuffer() });
+        }
+        if (!files.length) throw new Error("could not read any DICOM file");
+        win.postMessage({ type: "carino-pacs-files", files: files }, editorOrigin, files.map((f) => f.buf));
+        flashNote("Opened " + files.length + " file(s) in the editor", true);
+      } catch (err) {
+        flashNote("Editor hand-off failed: " + err.message, false);
+      }
+    }
+    window.addEventListener("message", onMsg);
+    setTimeout(() => { if (!done) window.removeEventListener("message", onMsg); }, 60000);
   }
 
   // Attach a PDF/image to an existing study (inherits its identity, new series).
@@ -487,6 +525,7 @@
     try {
       const data = await api("/api/stuck");
       renderStuck(data.destinations || []);
+      reflowActive();
     } catch (e) {
       list.innerHTML = "<div class='hist-empty'>Could not load: " + e.message + "</div>";
     }
@@ -533,6 +572,7 @@
     try {
       const data = await api("/api/pending");
       renderPending(data.items || []);
+      reflowActive();
     } catch (e) {
       list.innerHTML = "<div class='hist-empty'>Could not load: " + e.message + "</div>";
     }
@@ -599,33 +639,93 @@
     } catch (e) { flashNote(e.message, false); }
   }
 
+  /* ── Workspace panels: inline tabs that pop out only on overflow ──
+     Settings is ALWAYS a popup. History / Destinations / Logs / Pending /
+     Stuck render inline in the workspace, and auto-promote to a centered
+     popup only when their content is too tall to fit the viewport. Closing
+     the popup (✕ / backdrop / Esc) keeps that panel inline (scrolling) for
+     the rest of this activation. */
+  const INLINE_PANELS = ["dlgHistory", "dlgPending", "dlgStuck", "dlgDests", "dlgLogs"];
+  const SETTINGS_PANEL = "dlgSettings";
+  const loaders = { dlgHistory: loadHistory, dlgPending: loadPending, dlgStuck: loadStuck };
+  let activeInline = "dlgHistory";
+  let overlayId = null;
+  const dismissed = new Set();
+
+  function highlightTab(id) {
+    document.querySelectorAll(".tabbtn").forEach((b) => b.classList.toggle("active", b.dataset.panel === id));
+  }
+  function setBackdrop(on) { const b = $("panelBackdrop"); if (b) b.hidden = !on; }
+
+  function openOverlay(id) {
+    const p = $(id); if (!p) return;
+    p.hidden = false; p.classList.add("as-modal");
+    overlayId = id; setBackdrop(true);
+  }
+  function closeOverlay() {
+    if (!overlayId) return;
+    const p = $(overlayId);
+    if (p) p.classList.remove("as-modal");
+    if (overlayId === SETTINGS_PANEL) { if (p) p.hidden = true; }
+    else { dismissed.add(overlayId); }   // user prefers inline scroll this time
+    overlayId = null; setBackdrop(false);
+    highlightTab(activeInline);
+  }
+
+  function panelOverflows(id) {
+    // "Overflow" = the content is taller than the panel's inline scroll area
+    // (the CSS max-height on .modal-body). Measured inline only, so it's
+    // independent of viewport quirks and how tall the cards above happen to be.
+    const p = $(id); if (!p || p.hidden || p.classList.contains("as-modal")) return false;
+    const body = p.querySelector(".modal-body"); if (!body) return false;
+    return body.scrollHeight > body.clientHeight + 4;
+  }
+  function maybeOverflow(id) {
+    if (id !== activeInline || overlayId === id || dismissed.has(id)) return;
+    if (panelOverflows(id)) openOverlay(id);
+  }
+  function reflowActive() { maybeOverflow(activeInline); }
+
+  function showInline(id) {
+    closeOverlay();
+    activeInline = id;
+    dismissed.delete(id);
+    INLINE_PANELS.forEach((pid) => { const p = $(pid); if (p) { p.classList.remove("as-modal"); p.hidden = pid !== id; } });
+    $(SETTINGS_PANEL).hidden = true;
+    highlightTab(id);
+    if (loaders[id]) loaders[id]();                     // async panels re-check on render
+    requestAnimationFrame(() => maybeOverflow(id));     // sync panels (Logs/Dests) check now
+  }
+  function showSettings() {
+    $(SETTINGS_PANEL).hidden = false;
+    openOverlay(SETTINGS_PANEL);
+    highlightTab(SETTINGS_PANEL);
+  }
+
   /* ── Wire up ─────────────────────────────────────────────────── */
   document.addEventListener("DOMContentLoaded", () => {
     $("killSvc").addEventListener("click", killService);
     $("rxToggle").addEventListener("click", (e) => toggle("receiver", e.target));
     $("wxToggle").addEventListener("click", (e) => toggle("watcher", e.target));
     $("addDest").addEventListener("click", () => addDestRow({ enabled: true }));
-    $("saveCfg").addEventListener("click", () => saveConfig().then((ok) => { if (ok) $("dlgSettings").close(); }));
-    $("saveDests").addEventListener("click", () => saveConfig().then((ok) => { if (ok) $("dlgDests").close(); }));
+    $("saveCfg").addEventListener("click", () => saveConfig().then((ok) => { if (ok) closeOverlay(); }));
+    $("saveDests").addEventListener("click", () => saveConfig());
     $("clearLog").addEventListener("click", () => { $("log").innerHTML = ""; });
     wireDropZones();
 
-    // Popup windows: buttons → native <dialog> modals.
-    const openMap = { openSettings: "dlgSettings", openDests: "dlgDests", openLogs: "dlgLogs" };
-    Object.keys(openMap).forEach((b) =>
-      $(b).addEventListener("click", () => { const d = $(openMap[b]); if (d && !d.open) d.showModal(); }));
-    document.querySelectorAll(".modal").forEach((dlg) => {
-      dlg.querySelectorAll("[data-close]").forEach((x) => x.addEventListener("click", () => dlg.close()));
-      dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });  // click backdrop to close
-      // when a modal closes, return the toast to <body> so it isn't stuck hidden inside it
-      dlg.addEventListener("close", () => document.body.appendChild($("toast")));
-    });
+    // Tab strip: Settings always pops; the rest render inline (pop out on overflow).
+    document.querySelectorAll(".tabbtn").forEach((b) =>
+      b.addEventListener("click", () => {
+        const id = b.dataset.panel;
+        if (id === SETTINGS_PANEL) showSettings(); else showInline(id);
+      }));
+    // Close an open popup: ✕ button, backdrop click, or Escape.
+    document.querySelectorAll("[data-demote]").forEach((x) => x.addEventListener("click", closeOverlay));
+    $("panelBackdrop").addEventListener("click", closeOverlay);
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && overlayId) closeOverlay(); });
+    window.addEventListener("resize", reflowActive);
 
-    // History popup: open + load, tab switching, refresh, delete-all.
-    $("openHistory").addEventListener("click", () => {
-      const d = $("dlgHistory"); if (d && !d.open) d.showModal();
-      loadHistory();
-    });
+    // History Received/Sent sub-tabs.
     document.querySelectorAll(".hist-tab").forEach((tab) =>
       tab.addEventListener("click", () => {
         document.querySelectorAll(".hist-tab").forEach((t) => t.classList.remove("active"));
@@ -635,23 +735,12 @@
       }));
     $("histRefresh").addEventListener("click", loadHistory);
     $("histDeleteAll").addEventListener("click", histDeleteAll);
-
-    // Pending-imports popup: open + load, refresh.
-    $("openPending").addEventListener("click", () => {
-      const d = $("dlgPending"); if (d && !d.open) d.showModal();
-      loadPending();
-    });
     $("pendRefresh").addEventListener("click", loadPending);
-
-    // Stuck-sends popup: open + load, refresh, retry-all.
-    $("openStuck").addEventListener("click", () => {
-      const d = $("dlgStuck"); if (d && !d.open) d.showModal();
-      loadStuck();
-    });
     $("stuckRefresh").addEventListener("click", loadStuck);
     $("stuckRetryAll").addEventListener("click", () => retryStuck(null, $("stuckRetryAll")));
 
     loadConfig().catch((e) => flashNote("Load failed: " + e.message, false));
+    showInline("dlgHistory");   // default workspace view
     pollStatus();
     pollLog();
     statusTimer = setInterval(pollStatus, 2000);

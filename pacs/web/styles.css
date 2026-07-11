@@ -140,20 +140,49 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 .btn.action .badge.warn { background: var(--warn); color: #050505; }
 
 /* ── Three action buttons (open popups) ─────────────────────────── */
-.actions-row { display: flex; gap: 14px; }
+.actions-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .btn.action {
-  flex: 1; padding: 18px 16px; font-size: .95rem; font-weight: 700;
+  flex: 1; padding: 13px 14px; font-size: .92rem; font-weight: 700;
   text-transform: none; letter-spacing: 0; color: var(--text);
   background: linear-gradient(180deg, var(--panel), #080808);
   border: 1px solid var(--border); border-radius: 12px;
 }
-.btn.action:hover { border-color: var(--accent); color: var(--accent); transform: translateY(-2px); }
+.btn.action:hover { border-color: var(--accent); color: var(--accent); }
+/* active tab: highlighted, seam-joined to the workspace panel below */
+.btn.action.tabbtn.active {
+  border-color: var(--accent); color: var(--accent);
+  background: var(--accent-faint);
+}
 .btn.action .badge {
   display: inline-block; min-width: 20px; margin-left: 8px; padding: 0 6px;
   font-family: var(--mono); font-size: .7rem; font-weight: 700; line-height: 20px;
   color: #050505; background: var(--accent); border-radius: 10px; vertical-align: middle;
 }
-@media (max-width: 620px) { .actions-row { flex-direction: column; } }
+@media (max-width: 620px) { .btn.action { flex-basis: calc(50% - 8px); } }
+
+/* ── Inline workspace (the selected tab renders here) ───────────── */
+.workpanel { overflow: hidden; }
+.workpanel[hidden] { display: none; }
+.workpanel .modal-head { border-bottom: 1px solid var(--border); }
+.workpanel .modal-body { max-height: min(64vh, 620px); overflow-y: auto; }
+.workpanel .modal-body .log { height: min(58vh, 560px); }
+.workpanel .modal-foot { border-top: 1px solid var(--border); }
+.head-right { display: flex; align-items: center; gap: 10px; }
+
+/* A panel pops out to a centered overlay: always for Settings, and for the
+   others only when their content is too tall to fit inline (see app.js). */
+#panelBackdrop { position: fixed; inset: 0; z-index: 59;
+  background: rgba(0,0,0,.62); backdrop-filter: blur(2px); }
+#panelBackdrop[hidden] { display: none; }
+.workpanel.as-modal {
+  position: fixed; z-index: 60; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: min(900px, 94vw); max-width: 94vw;
+  box-shadow: 0 24px 60px rgba(0,0,0,.6);
+}
+.workpanel.as-modal .modal-body { max-height: 74vh; }
+/* the ✕ only makes sense when the panel is a popup */
+.workpanel .modal-x { display: none; }
+.workpanel.as-modal .modal-x { display: inline-flex; }
 
 /* ── Popup windows (native <dialog>) ────────────────────────────── */
 .modal { border: none; padding: 0; background: transparent; color: var(--text);
