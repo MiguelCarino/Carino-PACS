@@ -4,9 +4,26 @@
 # Produces:  desktop/engine/pacs-engine/pacs-engine[.exe]  (+ _internal/)
 # The Electron app bundles that folder as an extraResource and launches the binary.
 
+import importlib.util
 import os
 
 from PyInstaller.utils.hooks import collect_all
+
+# Fail LOUDLY if a required dependency isn't importable in the Python running
+# PyInstaller. Otherwise collect_all() silently no-ops on the missing package
+# and the frozen engine ships without it — crashing at launch with
+# "ModuleNotFoundError: No module named 'pydicom'" and serving nothing. Always
+# freeze with the venv from ./setup.sh (which installs requirements.txt).
+_REQUIRED = ("pydicom", "pynetdicom", "flask", "PIL", "psutil")
+_missing = [m for m in _REQUIRED if importlib.util.find_spec(m) is None]
+if _missing:
+    raise SystemExit(
+        "\n\nCannot freeze Carino PACS: missing dependencies in this Python: "
+        + ", ".join(_missing)
+        + "\nFreeze with the project venv instead:\n"
+        "  rm -rf .venv && ./setup.sh\n"
+        "  ./.venv/bin/python -m PyInstaller packaging/pacs-engine.spec --distpath desktop/engine --workpath build/pyi\n"
+    )
 
 # Paths in a .spec resolve relative to the spec's own dir (SPECPATH), so anchor
 # everything to the repo root (the spec lives in <root>/packaging/).

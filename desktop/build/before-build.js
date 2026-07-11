@@ -14,8 +14,10 @@ exports.default = async function beforeBuild() {
   if (!ok) {
     throw new Error(
       "\n\nCarino PACS engine not found at desktop/engine/pacs-engine.\n" +
-      "Freeze it first (from the repo root):\n\n" +
-      "  python -m PyInstaller packaging/pacs-engine.spec --distpath desktop/engine --workpath build/pyi\n"
+      "Freeze it first (from the repo root) — the venv needs the runtime deps AND PyInstaller:\n\n" +
+      "  rm -rf .venv && ./setup.sh\n" +
+      "  ./.venv/bin/pip install pyinstaller\n" +
+      "  ./.venv/bin/python -m PyInstaller packaging/pacs-engine.spec --distpath desktop/engine --workpath build/pyi\n"
     );
   }
   return false; // don't let electron-builder rebuild native deps (we have none)

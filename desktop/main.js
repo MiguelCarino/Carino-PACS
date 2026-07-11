@@ -161,7 +161,29 @@ function createWindow() {
     webPreferences: { contextIsolation: true, nodeIntegration: false },
   });
   win.loadFile(path.join(__dirname, "loading.html"));   // never a blank/black window
-  win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: "deny" }; });
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    // The bundled DICOM-editor opens in its OWN Electron window (not the system
+    // browser). action:"allow" keeps window.opener wired, so the PACS→editor
+    // postMessage bridge still delivers the study. Everything else (GitHub,
+    // LinkedIn, …) opens in the user's browser.
+    try {
+      const u = new URL(url);
+      const local = u.hostname === "127.0.0.1" || u.hostname === "localhost";
+      if (local && u.pathname.startsWith("/editor")) {
+        return {
+          action: "allow",
+          overrideBrowserWindowOptions: {
+            width: 1200, height: 860,
+            title: "DICOM Editor — Carino", icon: path.join(ASSETS, "icon.png"),
+            backgroundColor: "#000000", autoHideMenuBar: true,
+            webPreferences: { contextIsolation: true, nodeIntegration: false },
+          },
+        };
+      }
+    } catch (_) { /* not a parseable URL — fall through to external */ }
+    shell.openExternal(url);
+    return { action: "deny" };
+  });
   win.on("close", (e) => { if (!app.isQuitting) { e.preventDefault(); win.hide(); } });
 }
 

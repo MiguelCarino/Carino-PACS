@@ -1194,7 +1194,15 @@
     .wl-num:focus { outline: none; border-color: var(--accent); }
 
     /* ─── FILE BROWSER ───────────────────────── */
-    .file-browser-row { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 0 8px; border-bottom: 1px solid var(--border); margin-bottom: 6px; }
+    /* Series strip: one tile per series, horizontally scrollable (mouse-wheel) —
+       replaces the old one-tab-per-file row that overflowed on big studies. */
+    .file-browser-row { display: flex; flex-wrap: nowrap; gap: 6px; padding: 6px 2px 8px; border-bottom: 1px solid var(--border); margin-bottom: 6px; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; scroll-behavior: smooth; }
+    .series-tile { flex: 0 0 auto; display: flex; flex-direction: column; gap: 2px; min-width: 108px; max-width: 190px; padding: 6px 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; color: var(--text-muted); cursor: pointer; text-align: left; transition: all 0.15s; }
+    .series-tile:hover:not(.active) { border-color: var(--text-muted); color: var(--text-dim); }
+    .series-tile.active { border-color: var(--accent); color: var(--accent); background: rgba(234,179,8,0.1); }
+    .st-head { font: 700 11px var(--mono); text-transform: uppercase; letter-spacing: .04em; }
+    .st-desc { font: 500 11px var(--font); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 170px; }
+    .st-count { font: 600 10px var(--mono); opacity: .85; }
     .file-tab { padding: 3px 10px; font: 500 11px var(--mono); background: var(--surface); border: 1px solid var(--border); border-radius: 4px; color: var(--text-muted); cursor: pointer; transition: all 0.15s; white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
     .file-tab.active { border-color: var(--accent); color: var(--accent); background: rgba(234,179,8,0.1); }
     .file-tab:hover:not(.active) { border-color: var(--text-muted); color: var(--text-dim); }
@@ -1281,9 +1289,17 @@
     @keyframes toast-slide { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
 
     /* ─── LOADING OVERLAY ────────────────────── */
-    .load-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.65); display: none; flex-direction: column; align-items: center; justify-content: center; gap: 14px; z-index: 2000; }
+    .load-overlay { position: fixed; inset: 0; background: #000000; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 14px; z-index: 2000; }
     .load-overlay.visible { display: flex; }
-    .load-spinner { width: 36px; height: 36px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+    .ekg { width: 200px; height: 60px; overflow: visible; }
+    .ekg polyline { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .ekg .trace { stroke: var(--accent); stroke-width: 2; opacity: .12; }
+    .ekg .pulse { stroke: var(--accent); stroke-width: 2.6; stroke-dasharray: 22 120; filter: drop-shadow(0 0 6px rgba(234,179,8,.9)); animation: ekg 1.5s linear infinite; }
+    @keyframes ekg { from { stroke-dashoffset: 142; } to { stroke-dashoffset: 0; } }
+    @media (prefers-reduced-motion: reduce) { .ekg .pulse { animation: none; stroke-dasharray: none; } }
+    .load-bar-wrap { display: none; width: 240px; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
+    .load-bar { height: 100%; width: 0; background: var(--accent); transition: width 0.15s ease; }
+    .load-count { font: 600 12px var(--mono); color: var(--text-dim); }
     @keyframes spin { to { transform: rotate(360deg); } }
     .load-text { font: 600 13px var(--mono); color: var(--text); text-align: center; max-width: 320px; }
 
@@ -1858,8 +1874,14 @@
   </div><!-- end .app -->
 
   <div class="load-overlay" id="loadOverlay">
-    <div class="load-spinner"></div>
+    <!-- EKG heartbeat: faint full trace with a bright pulse sweeping across it -->
+    <svg class="ekg" viewBox="0 0 200 40" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+      <polyline class="trace" pathLength="100" points="0,20 80,20 88,20 94,12 100,20 108,20 114,3 122,37 128,20 138,20 148,15 158,20 200,20" />
+      <polyline class="pulse" pathLength="100" points="0,20 80,20 88,20 94,12 100,20 108,20 114,3 122,37 128,20 138,20 148,15 158,20 200,20" />
+    </svg>
     <div class="load-text" id="loadText">Loading…</div>
+    <div class="load-bar-wrap" id="loadBarWrap"><div class="load-bar" id="loadBar"></div></div>
+    <div class="load-count" id="loadCount"></div>
   </div>
 
   <div class="confirm-overlay" id="confirmOverlay">
@@ -3810,13 +3832,13 @@ async function handleFiles(list) {
   const arr = Array.from(list || []);
   if (!arr.length) return;
 
-  showLoading?.(true, `Loading ${arr.length} file(s)…`);
+  showLoading?.(true, `Loading image${arr.length > 1 ? 's' : ''}…`, 0, `0 / ${arr.length}`);
   log(`Loading ${arr.length} file(s)...`);
 
   const failures = [];
   for (let i = 0; i < arr.length; i++) {
     const file = arr[i];
-    showLoading?.(true, `Parsing ${i + 1} / ${arr.length}: ${file.name}`);
+    showLoading?.(true, `Loading image${arr.length > 1 ? 's' : ''}…`, (i + 1) / arr.length, `${i + 1} / ${arr.length}`);
     try {
       const buf = await file.arrayBuffer();
       const msg = DicomMessage.readFile(buf);
@@ -4851,9 +4873,19 @@ let wwOriginal = null;
 // ── Loading overlay ──────────────────────────────────────────────
 const loadOverlay = document.getElementById('loadOverlay');
 const loadText    = document.getElementById('loadText');
-function showLoading(visible, text = 'Loading…') {
+function showLoading(visible, text = 'Loading…', progress, count) {
   loadOverlay.classList.toggle('visible', visible);
   if (text) loadText.textContent = text;
+  const bw = document.getElementById('loadBarWrap'), b = document.getElementById('loadBar'), c = document.getElementById('loadCount');
+  if (bw && b) {
+    if (visible && typeof progress === 'number') {
+      bw.style.display = 'block';
+      b.style.width = Math.max(0, Math.min(100, Math.round(progress * 100))) + '%';
+    } else {
+      bw.style.display = 'none';
+    }
+  }
+  if (c) c.textContent = (visible && count) ? count : '';
 }
 
 // ── Confirm dialog for destructive actions ───────────────────────
@@ -4949,20 +4981,56 @@ function trackEditStart() {
 
 // ── File browser ─────────────────────────────────────────────────
 const fileBrowserRow = document.getElementById('fileBrowserRow');
+// Let a vertical mouse-wheel slide the (horizontal) series strip.
+fileBrowserRow?.addEventListener('wheel', (e) => {
+  if (!e.deltaY) return;
+  e.preventDefault();
+  fileBrowserRow.scrollLeft += e.deltaY;
+}, { passive: false });
 
+// Group the loaded files by Series Instance UID, preserving first-seen order.
+function groupSeries() {
+  const map = new Map(), order = [];
+  files.forEach((f, i) => {
+    const uid = (lookupTag(f.dict, '0020000e')?.Value?.[0]) || ('__noseries_' + i);
+    let s = map.get(uid);
+    if (!s) {
+      s = {
+        indices: [],
+        desc: String(lookupTag(f.dict, '0008103e')?.Value?.[0] || '').trim(),
+        modality: String(lookupTag(f.dict, '00080060')?.Value?.[0] || '').trim(),
+        num: String(lookupTag(f.dict, '00200011')?.Value?.[0] || '').trim(),
+      };
+      map.set(uid, s); order.push(s);
+    }
+    s.indices.push(i);
+  });
+  return order;
+}
+
+// One tile per series (not per file) so a study with hundreds of images stays
+// a short, wheel-scrollable strip. Prev/next buttons + arrow keys still step
+// through images one at a time; a tile jumps to the start of its series.
 function renderFileBrowser() {
   if (!fileBrowserRow) return;
   if (files.length <= 1) { fileBrowserRow.classList.add('hidden'); updatePreviewNav?.(); return; }
   fileBrowserRow.classList.remove('hidden');
   fileBrowserRow.innerHTML = '';
-  files.forEach((f, i) => {
-    const tab = document.createElement('button');
-    tab.className = 'file-tab' + (i === currentFileIdx ? ' active' : '');
-    tab.textContent = f.name;
-    tab.title = f.name;
-    tab.addEventListener('click', () => switchFile(i));
-    fileBrowserRow.appendChild(tab);
-  });
+  const mk = (cls, txt) => { const el = document.createElement('span'); el.className = cls; el.textContent = txt; return el; };
+  for (const s of groupSeries()) {
+    const active = s.indices.includes(currentFileIdx);
+    const tile = document.createElement('button');
+    tile.className = 'series-tile' + (active ? ' active' : '');
+    const head = (s.modality || 'IMG') + (s.num ? ' · #' + s.num : '');
+    const count = active
+      ? (s.indices.indexOf(currentFileIdx) + 1) + ' / ' + s.indices.length
+      : s.indices.length + (s.indices.length === 1 ? ' image' : ' images');
+    tile.append(mk('st-head', head), mk('st-desc', s.desc || 'Series'), mk('st-count', count));
+    tile.title = (s.desc || 'Series') + ' — ' + s.indices.length + ' image(s)';
+    tile.addEventListener('click', () => { if (!s.indices.includes(currentFileIdx)) switchFile(s.indices[0]); });
+    fileBrowserRow.appendChild(tile);
+  }
+  fileBrowserRow.querySelector('.series-tile.active')?.scrollIntoView({ inline: 'nearest', block: 'nearest' });
   updatePreviewNav?.();
 }
 
@@ -5561,16 +5629,18 @@ window.addEventListener('load', () => {
 
   // (A) postMessage bridge
   if (/[#&?]carino-bridge/.test(hash) && window.opener) {
+    showLoading?.(true, 'Copying study from Carino PACS…');       // spinner until the bytes arrive
+    const giveUp = setTimeout(() => { showLoading?.(false); toast?.('No response from Carino PACS'); }, 60000);
     const onMsg = async (ev) => {
       if (ev.source !== window.opener || !ev.data || ev.data.type !== 'carino-pacs-files') return;
-      window.removeEventListener('message', onMsg);
+      window.removeEventListener('message', onMsg); clearTimeout(giveUp);
       try {
         const loaded = (ev.data.files || []).map(f => new File([f.buf], f.name || 'study.dcm'));
         if (!loaded.length) throw new Error('no files received');
-        await handleFiles(loaded);
+        await handleFiles(loaded);          // shows its own per-image progress
         switchTab('editor');
-        toast?.(`Loaded ${loaded.length} file(s) from Carino PACS`);
-      } catch (err) { toast?.('PACS hand-off failed: ' + (err.message || err)); }
+        toast?.(`Loaded ${loaded.length} image(s) from Carino PACS`);
+      } catch (err) { showLoading?.(false); toast?.('PACS hand-off failed: ' + (err.message || err)); }
     };
     window.addEventListener('message', onMsg);
     try { window.opener.postMessage({ type: 'carino-pacs-ready' }, '*'); } catch { /* opener gone */ }
@@ -5584,13 +5654,16 @@ window.addEventListener('load', () => {
   try { manifestUrl = decodeURIComponent(m[1]); } catch { return; }
   (async () => {
     try {
+      showLoading?.(true, 'Copying study from Carino PACS…');
       const res = await fetch(manifestUrl, { credentials: 'omit' });
       if (!res.ok) throw new Error('manifest HTTP ' + res.status);
       const data = await res.json();
       const entries = (data && data.files) || [];
       if (!entries.length) throw new Error(data && data.message || 'no DICOM files in study');
       const loaded = [];
-      for (const e of entries) {
+      for (let n = 0; n < entries.length; n++) {
+        const e = entries[n];
+        showLoading?.(true, 'Copying study from Carino PACS…', n / entries.length, `${n + 1} / ${entries.length}`);
         try {
           const r = await fetch(new URL(e.url, manifestUrl).href, { credentials: 'omit' });
           if (!r.ok) continue;
@@ -5600,8 +5673,9 @@ window.addEventListener('load', () => {
       if (!loaded.length) throw new Error('could not fetch any DICOM file');
       await handleFiles(loaded);
       switchTab('editor');
-      toast?.(`Loaded ${loaded.length} file(s) from Carino PACS`);
+      toast?.(`Loaded ${loaded.length} image(s) from Carino PACS`);
     } catch (err) {
+      showLoading?.(false);
       toast?.('PACS deep-link failed: ' + (err.message || err));
     }
   })();
