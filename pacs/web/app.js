@@ -15,6 +15,7 @@
 
   let loadedWeb = { host: "127.0.0.1", port: 8042 }; // preserved across saves
   let statusTimer = null, logTimer = null;
+  let editorUrl = "";                                // DICOM-editor base URL (from status); "" hides ✎ Edit
 
   /* ── Status polling ──────────────────────────────────────────── */
   function renderStatus(s) {
@@ -24,16 +25,22 @@
     const ni = $("netInfo");
     if (ni) {
       ni.textContent = "";
-      if (s.host_ip) {
+      // Prefer the full list (multi-homed hosts / device subnets); fall back to
+      // the single primary IP for older engines.
+      const ips = (s.host_ips && s.host_ips.length) ? s.host_ips : (s.host_ip ? [s.host_ip] : []);
+      if (ips.length) {
         ni.classList.remove("offline");
         const v = (t) => { const el = document.createElement("span"); el.className = "v"; el.textContent = t; return el; };
-        ni.append("Your IP is ", v(s.host_ip), " · your AE title is ", v(rx.aet),
-                  " · your port is ", v(String(rx.port)));
+        ni.append(ips.length > 1 ? "Reachable at " : "Your IP is ");
+        ips.forEach((ip, i) => { if (i) ni.append(" · "); ni.append(v(ip)); });
+        ni.append(" · AE title ", v(rx.aet), " · port ", v(String(rx.port)));
       } else {
         ni.classList.add("offline");
         ni.textContent = "You're offline — no network detected";
       }
     }
+
+    editorUrl = (s.editor_url || "").trim();
 
     // Pending-imports badge on the 📎 button.
     const badge = $("pendingBadge");
@@ -362,6 +369,11 @@
       sendBtn.textContent = histGroup === "sent" ? "Resend" : "Send";
       sendBtn.addEventListener("click", () => histAction("send", s, sendBtn));
       row.querySelector(".hist-attach").addEventListener("click", () => histAttach(s));
+      const editBtn = row.querySelector(".hist-edit");
+      if (editorUrl) {
+        editBtn.hidden = false;
+        editBtn.addEventListener("click", () => histEdit(s));
+      }
       row.querySelector(".hist-open").addEventListener("click", () => histAction("reveal", s));
       row.querySelector(".hist-del").addEventListener("click", () => histDelete(s));
       list.appendChild(row);
@@ -400,6 +412,16 @@
       flashNote(r.message || ("Removed " + (r.removed || 0)), r.ok !== false);
       loadHistory();
     } catch (e) { flashNote(e.message, false); }
+  }
+
+  // Open a study in DICOM-editor via deep-link. We hand the editor a manifest
+  // URL (absolute, this dashboard's origin); it fetches each DICOM and loads it.
+  function histEdit(s) {
+    if (!editorUrl) return;
+    const manifest = location.origin + "/api/studies/files?group=" +
+      encodeURIComponent(histGroup) + "&path=" + encodeURIComponent(s.path);
+    const sep = editorUrl.includes("#") ? "&" : "#";
+    window.open(editorUrl + sep + "load=" + encodeURIComponent(manifest), "_blank", "noopener");
   }
 
   // Attach a PDF/image to an existing study (inherits its identity, new series).

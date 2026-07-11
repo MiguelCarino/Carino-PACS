@@ -231,6 +231,47 @@ class PacsServer:
         return {"ok": True, "message": f"Attached {filename} — hit {'Resend' if group in ('sent', 'archived') else 'Send'} to forward it",
                 "file": os.path.basename(out)}
 
+    # ---- DICOM-editor deep-link -------------------------------------------
+    def study_dicom_files(self, group: str, path: str) -> dict:
+        """Manifest of a study's DICOM files ({name, url}) for the DICOM-editor
+        deep-link to fetch. Reuses study_files' root gate."""
+        from . import history
+        from urllib.parse import urlencode
+        root = self._group_root(group)
+        if root is None:
+            return {"ok": False, "message": "group must be received|sent"}
+        try:
+            files = history.study_files(root, path)
+        except (ValueError, OSError) as exc:
+            return {"ok": False, "message": str(exc)}
+        if not files:
+            return {"ok": False, "message": "no DICOM files found for this study"}
+        base = path if os.path.isdir(path) else os.path.dirname(path)
+        out = []
+        for fp in files:
+            name = os.path.relpath(fp, base)
+            url = "/api/studies/file?" + urlencode({"group": group, "path": path, "name": name})
+            out.append({"name": name, "url": url})
+        return {"ok": True, "files": out}
+
+    def study_dicom_file(self, group: str, path: str, name: str) -> Optional[str]:
+        """Absolute path of one named DICOM file in a study, or None. Only files
+        that study_files already vouched for (in-root, is_dicom) can match, so a
+        crafted 'name' can't escape the study."""
+        from . import history
+        root = self._group_root(group)
+        if root is None:
+            return None
+        try:
+            files = history.study_files(root, path)
+        except (ValueError, OSError):
+            return None
+        base = path if os.path.isdir(path) else os.path.dirname(path)
+        for fp in files:
+            if os.path.relpath(fp, base) == name:
+                return fp
+        return None
+
     # ---- pending imports (non-DICOM awaiting review) ----------------------
     def _pending_dir(self) -> str:
         return self.cfg.resolved("scu", "pending_dir")
@@ -309,6 +350,32 @@ class PacsServer:
         finally:
             s.close()
 
+    @staticmethod
+    def _local_ips() -> list:
+        """Every non-loopback IPv4 address on this host, so an operator can point
+        a modality on ANY local subnet at the right one. Default-route IP first,
+        the rest sorted. Handles a multi-homed host with several device networks
+        (and an air-gapped device subnet that has no default route at all)."""
+        import socket
+        found: list = []
+        try:
+            import psutil
+            for addrs in psutil.net_if_addrs().values():
+                for a in addrs:
+                    if (a.family == socket.AF_INET and a.address
+                            and not a.address.startswith("127.")
+                            and a.address not in found):
+                        found.append(a.address)
+        except Exception:                       # psutil missing / platform quirk
+            pass
+        primary = PacsServer._local_ip()        # default-route source IP (or None)
+        if primary and primary in found:
+            found.remove(primary)
+        found.sort()
+        if primary:
+            found.insert(0, primary)
+        return found
+
     def status(self) -> dict:
         from . import ingest
         scp = self.scp
@@ -337,7 +404,9 @@ class PacsServer:
             "config_path": self.cfg.path,
             "logs_dir": self.cfg.logs_dir,
             "host_ip": self._local_ip(),
+            "host_ips": self._local_ips(),
             "pending": ingest.count_pending(self._pending_dir()),
+            "editor_url": self.cfg.web.get("editor_url", ""),
         }
 
     def shutdown(self) -> None:

@@ -12,7 +12,7 @@ import sys
 import threading
 import time
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_file, send_from_directory
 
 from . import APP_NAME, __version__
 from .server import PacsServer
@@ -146,6 +146,34 @@ def create_app(server: PacsServer) -> Flask:
             return jsonify(ok=False, message="need a study 'path' and a 'file'"), 400
         res = server.attach_to_study(group, path, up.filename, up.read())
         return jsonify(res), (200 if res.get("ok") else 400)
+
+    # ---- DICOM-editor deep-link (CORS-open, GET-only) ---------------------
+    # The editor is a separate origin (and often file://), so these two GET
+    # endpoints allow cross-origin reads. Consistent with the dashboard's
+    # localhost-only, no-auth posture; nothing here mutates state.
+    def _cors(resp):
+        resp.headers["Access-Control-Allow-Origin"] = "*"
+        return resp
+
+    @app.get("/api/studies/files")
+    def api_studies_files():
+        group = request.args.get("group", "received")
+        path = request.args.get("path")
+        if not path:
+            return _cors(jsonify(ok=False, message="missing 'path'")), 400
+        res = server.study_dicom_files(group, path)
+        return _cors(jsonify(res)), (200 if res.get("ok") else 400)
+
+    @app.get("/api/studies/file")
+    def api_studies_file():
+        group = request.args.get("group", "received")
+        path = request.args.get("path", "")
+        name = request.args.get("name", "")
+        fp = server.study_dicom_file(group, path, name)
+        if not fp:
+            return _cors(jsonify(error="not found")), 404
+        return _cors(send_file(fp, mimetype="application/dicom",
+                               as_attachment=False, download_name=os.path.basename(fp)))
 
     # ---- pending imports (non-DICOM awaiting review) ----------------------
     @app.get("/api/pending")

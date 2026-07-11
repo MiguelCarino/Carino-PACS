@@ -45,7 +45,11 @@ DEFAULTS: dict[str, Any] = {
         "tls_key": "",          # our client private key (optional)
     },
     "destinations": [],
-    "web": {"host": "127.0.0.1", "port": 8042},
+    "web": {
+        "host": "127.0.0.1",
+        "port": 8042,
+        "editor_url": "",       # DICOM-editor base URL; set it to enable the ✎ Edit deep-link
+    },
     "logs_dir": "./logs",       # dated log files (one per day) live here
 }
 
