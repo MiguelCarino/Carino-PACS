@@ -24,6 +24,18 @@
     "tls_cert": "",
     "tls_key": ""
   },
+  "print": {
+    "enabled": false,
+    "aet": "CARINOPRINT",
+    "bind": "0.0.0.0",
+    "port": 11113,
+    "color": false,
+    "layout": "pdf",
+    "allowed_aets": [],
+    "tls": false,
+    "tls_cert": "",
+    "tls_key": ""
+  },
   "destinations": [
     {
       "name": "Example PACS",

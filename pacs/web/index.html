@@ -45,6 +45,22 @@
         </dl>
         <div class="drop-hint">⤓ drop a folder here to set the watched location</div>
       </article>
+
+      <article class="card" id="printerCard">
+        <header class="card-head">
+          <div class="card-title"><span class="dot" id="pxDot"></span> Print receiver <small>virtual film printer</small></div>
+          <button class="btn toggle" id="pxToggle" data-on="false">Start</button>
+        </header>
+        <dl class="kv">
+          <div><dt>AE title</dt><dd id="pxAet">—</dd></div>
+          <div><dt>Listening</dt><dd id="pxAddr">—</dd></div>
+          <div><dt>Mode</dt><dd id="pxMode">—</dd></div>
+          <div><dt>Printed</dt><dd id="pxCount">0</dd></div>
+          <div><dt>Errors</dt><dd id="pxErr">0</dd></div>
+          <div><dt>Security</dt><dd id="pxTls">—</dd></div>
+        </dl>
+        <div class="drop-hint">captured films land in 📎 Pending for review</div>
+      </article>
     </section>
 
     <!-- ── This machine's network identity ──────────────────────────── -->
@@ -181,6 +197,26 @@
               <label>Trusted CA bundle <input id="scuTlsCa" placeholder="blank = system trust store" /></label>
               <label>Client certificate (PEM) <input id="scuTlsCert" placeholder="optional — for mutual TLS" /></label>
               <label>Client private key (PEM) <input id="scuTlsKey" placeholder="optional" /></label>
+            </fieldset>
+            <fieldset>
+              <legend>Print receiver</legend>
+              <label class="check"><input id="prnEnabled" type="checkbox" /> Start the print receiver on launch</label>
+              <label>Printer AE title <input id="prnAet" maxlength="16" /></label>
+              <label>Bind address <input id="prnBind" /></label>
+              <label>Port <input id="prnPort" type="number" min="1" max="65535" /></label>
+              <label>Store each captured film as
+                <select id="prnLayout">
+                  <option value="pdf">PDF document (Encapsulated PDF)</option>
+                  <option value="image">Image (Secondary Capture)</option>
+                </select>
+              </label>
+              <label class="check"><input id="prnColor" type="checkbox" /> Also accept color print jobs</label>
+              <label>Accept only these AEs <input id="prnAllowed" placeholder="comma-separated, blank = any" /></label>
+              <label class="check"><input id="prnTls" type="checkbox" /> Serve print over TLS</label>
+              <label>TLS certificate (PEM) <input id="prnTlsCert" placeholder="path to server.crt" /></label>
+              <label>TLS private key (PEM) <input id="prnTlsKey" placeholder="path to server.key" /></label>
+              <label>Client-cert CA — mutual TLS <input id="prnTlsCa" placeholder="blank = don't require client certs" /></label>
+              <p class="hint" style="margin:2px 0 0">Point a print-only modality at this AE / port as its DICOM printer. Each captured film is queued in <em>📎 Pending</em> for you to identify, then Approve to convert to DICOM and forward.</p>
             </fieldset>
             <fieldset>
               <legend>Integrations</legend>

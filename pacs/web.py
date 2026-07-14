@@ -84,6 +84,20 @@ def create_app(server: PacsServer) -> Flask:
             return jsonify(error=f"could not start receiver: {exc}"), 400
         return jsonify(ok=True, receiver=server.status()["receiver"])
 
+    @app.post("/api/printer")
+    def api_printer():
+        action = (request.get_json(silent=True) or {}).get("action")
+        try:
+            if action == "start":
+                server.start_printer()
+            elif action == "stop":
+                server.stop_printer()
+            else:
+                return jsonify(error="action must be start|stop"), 400
+        except OSError as exc:
+            return jsonify(error=f"could not start print receiver: {exc}"), 400
+        return jsonify(ok=True, printer=server.status()["printer"])
+
     @app.post("/api/watcher")
     def api_watcher():
         action = (request.get_json(silent=True) or {}).get("action")

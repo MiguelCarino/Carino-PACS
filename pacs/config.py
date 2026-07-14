@@ -45,6 +45,19 @@ DEFAULTS: dict[str, Any] = {
         "tls_cert": "",         # our client certificate for mutual TLS (optional)
         "tls_key": "",          # our client private key (optional)
     },
+    "print": {                  # virtual DICOM film printer (capture print-only modalities)
+        "enabled": False,       # opt-in — off by default
+        "aet": "CARINOPRINT",
+        "bind": "0.0.0.0",
+        "port": 11113,          # distinct from scp.port (11112)
+        "color": False,         # also advertise Basic Color Print Management
+        "layout": "pdf",        # how a captured film is stored: pdf (Encapsulated PDF) | image (Secondary Capture)
+        "allowed_aets": [],
+        "tls": False,
+        "tls_cert": "",
+        "tls_key": "",
+        "tls_ca": "",
+    },
     "destinations": [],
     "web": {
         "host": "127.0.0.1",
@@ -116,6 +129,10 @@ class Config:
         return self.data["web"]
 
     @property
+    def printer(self) -> dict:
+        return self.data["print"]
+
+    @property
     def destinations(self) -> list[dict]:
         return self.data["destinations"]
 
@@ -166,6 +183,22 @@ def validate(data: dict) -> None:
     if data["scp"].get("tls"):
         if not str(data["scp"].get("tls_cert", "")).strip() or not str(data["scp"].get("tls_key", "")).strip():
             raise ValueError("scp.tls is on but tls_cert / tls_key are not set")
+
+    pr = data.get("print")
+    if pr is not None:
+        if not isinstance(pr, dict):
+            raise ValueError("'print' must be an object")
+        pp = pr.get("port", 11113)
+        if not (isinstance(pp, int) and 1 <= pp <= 65535):
+            raise ValueError("print.port must be 1..65535")
+        if pr.get("enabled") and pp == data["scp"]["port"]:
+            raise ValueError("print.port must differ from scp.port")
+        if len(str(pr.get("aet", ""))) > 16:
+            raise ValueError("print.aet must be 16 characters or fewer")
+        if pr.get("layout", "pdf") not in ("pdf", "image", "secondary_capture", "sc"):
+            raise ValueError("print.layout must be 'pdf' or 'image'")
+        if pr.get("tls") and (not str(pr.get("tls_cert", "")).strip() or not str(pr.get("tls_key", "")).strip()):
+            raise ValueError("print.tls is on but tls_cert / tls_key are not set")
 
     dests = data.get("destinations", [])
     if not isinstance(dests, list):

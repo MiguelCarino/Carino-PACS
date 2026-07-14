@@ -3,6 +3,7 @@
     python -m pacs serve      # web dashboard (+ optional --receive/--watch)
     python -m pacs receive    # Storage SCP only, headless
     python -m pacs send       # folder watcher / auto-forward only, headless
+    python -m pacs print      # virtual DICOM print receiver only, headless
     python -m pacs echo ...    # C-ECHO connectivity test
     python -m pacs init       # scaffold config.json + folders
 """
@@ -89,6 +90,12 @@ def cmd_serve(args) -> int:
         except Exception as exc:
             server.log.error(f"Could not start watcher: {exc}", kind="watch")
             print(f"WARNING: watcher did not start: {exc}", file=sys.stderr)
+    if args.print or cfg.printer.get("enabled"):
+        try:
+            server.start_printer()
+        except Exception as exc:
+            server.log.error(f"Could not start print receiver: {exc}", kind="print")
+            print(f"WARNING: print receiver did not start: {exc}", file=sys.stderr)
 
     host = args.host or cfg.web.get("host", "127.0.0.1")
     port = args.port or int(cfg.web.get("port", 8042))
@@ -126,6 +133,18 @@ def cmd_send(args) -> int:
         return 2
     server = PacsServer(cfg)
     server.start_watcher()
+    _block_until_signal(server)
+    return 0
+
+
+def cmd_print(args) -> int:
+    cfg = Config(args.config)
+    if args.port:
+        cfg.printer["port"] = args.port
+    if args.aet:
+        cfg.printer["aet"] = args.aet
+    server = PacsServer(cfg)
+    server.start_printer()
     _block_until_signal(server)
     return 0
 
@@ -172,6 +191,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--port", type=int, help="override web port")
     s.add_argument("--receive", action="store_true", help="also start the receiver on launch")
     s.add_argument("--watch", action="store_true", help="also start the folder watcher on launch")
+    s.add_argument("--print", action="store_true", dest="print",
+                   help="also start the virtual DICOM print receiver on launch")
     s.set_defaults(func=cmd_serve)
 
     r = sub.add_parser("receive", help="run the Storage SCP (receiver) headless")
@@ -183,6 +204,11 @@ def build_parser() -> argparse.ArgumentParser:
     se = sub.add_parser("send", help="watch a folder and auto-forward headless")
     se.add_argument("--watch-dir", help="folder to watch")
     se.set_defaults(func=cmd_send)
+
+    pr = sub.add_parser("print", help="run the virtual DICOM print receiver headless")
+    pr.add_argument("--port", type=int, help="listen port")
+    pr.add_argument("--aet", help="local (printer) AE title")
+    pr.set_defaults(func=cmd_print)
 
     e = sub.add_parser("echo", help="C-ECHO connectivity test")
     e.add_argument("--name", help="destination name from config")

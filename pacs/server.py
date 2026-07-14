@@ -7,11 +7,13 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 from typing import Optional
 
 from .config import Config
 from .logbuf import LogBuffer
+from .print_scp import PrintSCP
 from .scp import StorageSCP
 from .scu import Destination, SendResult, c_echo
 from .watcher import FolderWatcher
@@ -23,6 +25,7 @@ class PacsServer:
         self.log = LogBuffer(log_dir=cfg.logs_dir)
         self._lock = threading.Lock()
         self.scp: Optional[StorageSCP] = None
+        self.print_scp: Optional[PrintSCP] = None
         self.watcher = FolderWatcher(cfg, self.log)
 
     # ---- receiver (Storage SCP) -------------------------------------------
@@ -62,6 +65,50 @@ class PacsServer:
         with self._lock:
             if self.scp:
                 self.scp.stop()
+
+    # ---- print receiver (virtual DICOM film printer) ----------------------
+    def _ingest_print(self, data: bytes, kind: str, identity: dict, name: str) -> None:
+        """Sink for a captured print job: stage the rendered film (PDF or image)
+        into the pending-review queue (a print carries no trustworthy identity,
+        so an operator confirms + approves it before it is ever forwarded)."""
+        from . import ingest
+        pending_dir = self._pending_dir()
+        os.makedirs(pending_dir, exist_ok=True)
+        tmp_dir = tempfile.mkdtemp(prefix="carinoprint-")
+        tmp = os.path.join(tmp_dir, name)
+        try:
+            with open(tmp, "wb") as fh:
+                fh.write(data)
+            ingest.stage_pending(pending_dir, tmp, identity, kind)
+        finally:
+            import shutil as _sh
+            _sh.rmtree(tmp_dir, ignore_errors=True)
+
+    def start_printer(self) -> None:
+        with self._lock:
+            if self.print_scp and self.print_scp.running:
+                return
+            p = self.cfg.printer
+            self.print_scp = PrintSCP(
+                aet=p.get("aet", "CARINOPRINT"),
+                bind=p.get("bind", "0.0.0.0"),
+                port=int(p.get("port", 11113)),
+                log=self.log,
+                on_output=self._ingest_print,
+                color=bool(p.get("color", False)),
+                layout=p.get("layout", "pdf"),
+                allowed_aets=p.get("allowed_aets", []),
+                tls=bool(p.get("tls", False)),
+                tls_cert=self.cfg.resolve_path(p.get("tls_cert", "")),
+                tls_key=self.cfg.resolve_path(p.get("tls_key", "")),
+                tls_ca=self.cfg.resolve_path(p.get("tls_ca", "")),
+            )
+            self.print_scp.start()
+
+    def stop_printer(self) -> None:
+        with self._lock:
+            if self.print_scp:
+                self.print_scp.stop()
 
     # ---- watcher (auto-send) ----------------------------------------------
     def start_watcher(self) -> None:
@@ -327,11 +374,15 @@ class PacsServer:
         # receiver (raises ValueError, surfaced to the caller as a 400).
         self.cfg.would_accept(new_data)
         was_receiving = bool(self.scp and self.scp.running)
+        was_printing = bool(self.print_scp and self.print_scp.running)
         self.stop_receiver()
+        self.stop_printer()
         self.cfg.replace(new_data)
         self.log.log_dir = self.cfg.logs_dir   # logs_dir may have changed
         if was_receiving:
             self.start_receiver()
+        if was_printing:
+            self.start_printer()
         self.log.info("Configuration updated", kind="config")
 
     # ---- status ------------------------------------------------------------
@@ -454,6 +505,8 @@ class PacsServer:
     def status(self) -> dict:
         from . import ingest
         scp = self.scp
+        pscp = self.print_scp
+        pr = self.cfg.printer
         return {
             "receiver": {
                 "running": bool(scp and scp.running),
@@ -467,6 +520,18 @@ class PacsServer:
                 "refused": scp.refused_count if scp else 0,
                 "tls": bool(self.cfg.scp.get("tls", False)),
                 "tls_mutual": bool(self.cfg.scp.get("tls", False) and self.cfg.scp.get("tls_ca", "")),
+            },
+            "printer": {
+                "enabled": bool(pr.get("enabled", False)),
+                "running": bool(pscp and pscp.running),
+                "aet": pr.get("aet", "CARINOPRINT"),
+                "bind": pr.get("bind", "0.0.0.0"),
+                "port": int(pr.get("port", 11113)),
+                "color": bool(pr.get("color", False)),
+                "layout": pr.get("layout", "pdf"),
+                "printed": pscp.printed_count if pscp else 0,
+                "errors": pscp.error_count if pscp else 0,
+                "tls": bool(pr.get("tls", False)),
             },
             "watcher": {
                 **self.watcher.stats(),
@@ -490,3 +555,4 @@ class PacsServer:
     def shutdown(self) -> None:
         self.stop_watcher()
         self.stop_receiver()
+        self.stop_printer()

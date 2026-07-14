@@ -16,14 +16,14 @@
   // Full loaded config sections — kept so a Save preserves any key that has no
   // form input (min_free_gb, pending_dir, …); apply_config merges over DEFAULTS,
   // so an omitted key would otherwise silently reset.
-  let loadedScp = {}, loadedScu = {};
+  let loadedScp = {}, loadedScu = {}, loadedPrint = {};
   let loadedWeb = { host: "127.0.0.1", port: 8042 };
   let statusTimer = null, logTimer = null;
   let editorUrl = "";                                // DICOM-editor base URL (from status); "" hides ✎ Edit
 
   /* ── Status polling ──────────────────────────────────────────── */
   function renderStatus(s) {
-    const rx = s.receiver, wx = s.watcher;
+    const rx = s.receiver, wx = s.watcher, px = s.printer || {};
 
     // This machine's network identity (what remote nodes send to).
     const ni = $("netInfo");
@@ -38,6 +38,9 @@
         ni.append(ips.length > 1 ? "Reachable at " : "Your IP is ");
         ips.forEach((ip, i) => { if (i) ni.append(" · "); ni.append(v(ip)); });
         ni.append(" · AE title ", v(rx.aet), " · port ", v(String(rx.port)));
+        if (px.running || px.enabled) {
+          ni.append(" · print ", v(px.aet), " : ", v(String(px.port)));
+        }
       } else {
         ni.classList.add("offline");
         ni.textContent = "You're offline — no network detected";
@@ -92,6 +95,16 @@
     $("wxFailed").textContent = wx.failed;
     $("wxLast").textContent = wx.last_activity || "—";
     setToggle($("wxToggle"), wx.running);
+
+    setDot($("pxDot"), px.running);
+    $("pxAet").textContent = px.aet || "—";
+    $("pxAddr").textContent = `${px.bind || "0.0.0.0"}:${px.port}`;
+    $("pxMode").textContent = (px.color ? "grayscale + color" : "grayscale") +
+      " · " + (px.layout === "image" ? "→ image" : "→ PDF");
+    $("pxCount").textContent = px.printed || 0;
+    $("pxErr").textContent = px.errors || 0;
+    $("pxTls").textContent = px.tls ? "TLS" : "plaintext";
+    setToggle($("pxToggle"), px.running);
   }
   function setToggle(btn, on) {
     btn.dataset.on = String(on);
@@ -119,11 +132,12 @@
       const data = await api("/api/log?since=" + logSeq);
       const box = $("log");
       const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 20;
-      let sawStore = false, sawSend = false;
+      let sawStore = false, sawSend = false, sawPrint = false;
       for (const e of data.entries) {
         logSeq = e.seq;
         if (e.kind === "store") sawStore = true;   // a file was received
         if (e.kind === "send") sawSend = true;      // a file was forwarded
+        if (e.kind === "print") sawPrint = true;    // a print job / event
         const line = document.createElement("div");
         line.className = "line";
         const t = document.createElement("span");
@@ -140,6 +154,7 @@
       if (!firstLog) {                 // don't blink for the backlog on first load
         if (sawStore) blink($("rxDot"));
         if (sawSend) blink($("wxDot"));
+        if (sawPrint) blink($("pxDot"));
       }
       firstLog = false;
     } catch (e) { /* ignore */ }
@@ -150,6 +165,7 @@
     const c = await api("/api/config");
     loadedScp = c.scp || {};
     loadedScu = c.scu || {};
+    loadedPrint = c.print || {};
     loadedWeb = c.web || loadedWeb;
     $("webEditorUrl").value = (c.web && c.web.editor_url) || "";
     $("scpAet").value = c.scp.aet;
@@ -172,6 +188,18 @@
     $("scuTlsCa").value = c.scu.tls_ca || "";
     $("scuTlsCert").value = c.scu.tls_cert || "";
     $("scuTlsKey").value = c.scu.tls_key || "";
+    const pr = c.print || {};
+    $("prnEnabled").checked = !!pr.enabled;
+    $("prnAet").value = pr.aet || "CARINOPRINT";
+    $("prnBind").value = pr.bind || "0.0.0.0";
+    $("prnPort").value = pr.port != null ? pr.port : 11113;
+    $("prnLayout").value = (pr.layout === "image" || pr.layout === "secondary_capture") ? "image" : "pdf";
+    $("prnColor").checked = !!pr.color;
+    $("prnAllowed").value = (pr.allowed_aets || []).join(", ");
+    $("prnTls").checked = !!pr.tls;
+    $("prnTlsCert").value = pr.tls_cert || "";
+    $("prnTlsKey").value = pr.tls_key || "";
+    $("prnTlsCa").value = pr.tls_ca || "";
     renderDests(c.destinations || []);
     reflowActive();
   }
@@ -238,6 +266,20 @@
         tls_ca: $("scuTlsCa").value.trim(),
         tls_cert: $("scuTlsCert").value.trim(),
         tls_key: $("scuTlsKey").value.trim(),
+      },
+      print: {
+        ...loadedPrint,
+        enabled: $("prnEnabled").checked,
+        aet: $("prnAet").value.trim() || "CARINOPRINT",
+        bind: $("prnBind").value.trim() || "0.0.0.0",
+        port: parseInt($("prnPort").value, 10),
+        layout: $("prnLayout").value,
+        color: $("prnColor").checked,
+        allowed_aets: $("prnAllowed").value.split(",").map((s) => s.trim()).filter(Boolean),
+        tls: $("prnTls").checked,
+        tls_cert: $("prnTlsCert").value.trim(),
+        tls_key: $("prnTlsKey").value.trim(),
+        tls_ca: $("prnTlsCa").value.trim(),
       },
       destinations: collectDests(),
       web: { ...loadedWeb, editor_url: $("webEditorUrl").value.trim() },
@@ -707,6 +749,12 @@
     $("killSvc").addEventListener("click", killService);
     $("rxToggle").addEventListener("click", (e) => toggle("receiver", e.target));
     $("wxToggle").addEventListener("click", (e) => toggle("watcher", e.target));
+    $("pxToggle").addEventListener("click", (e) => {
+      // Starting from the card also flips the "start on launch" flag so it
+      // survives a restart (toggle() persists the config before starting).
+      if (e.target.dataset.on !== "true") $("prnEnabled").checked = true;
+      toggle("printer", e.target);
+    });
     $("addDest").addEventListener("click", () => addDestRow({ enabled: true }));
     $("saveCfg").addEventListener("click", () => saveConfig().then((ok) => { if (ok) closeOverlay(); }));
     $("saveDests").addEventListener("click", () => saveConfig());

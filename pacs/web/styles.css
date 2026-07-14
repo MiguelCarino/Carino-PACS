@@ -22,7 +22,7 @@ body {
 .wrap { width: min(1100px, 92%); margin: 0 auto; padding: 28px 0 60px; display: flex; flex-direction: column; gap: 22px; }
 
 /* ---- status cards ---- */
-.cards { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; }
 @media (max-width: 720px) { .cards { grid-template-columns: 1fr; } }
 .card, .panel {
   background: linear-gradient(180deg, var(--panel), #080808);
