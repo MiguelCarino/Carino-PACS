@@ -188,6 +188,8 @@
     .ov-study-idx { font-family: var(--mono); font-size: 11px; color: var(--text-muted); margin-left: 8px; }
     .ov-open-btn { padding: 7px 14px; border: 1px solid var(--accent); background: var(--accent-faint); color: var(--accent); border-radius: 6px; cursor: pointer; font: 600 12px var(--font); white-space: nowrap; transition: .15s; flex-shrink: 0; }
     .ov-open-btn:hover { background: var(--accent); color: #050505; }
+    .ov-print-btn { padding: 7px 14px; border: 1px solid var(--border); background: transparent; color: var(--text-dim); border-radius: 6px; cursor: pointer; font: 600 12px var(--font); white-space: nowrap; transition: .15s; flex-shrink: 0; }
+    .ov-print-btn:hover { border-color: var(--accent); color: var(--accent); }
     .ov-content.ov-dragover { outline: 2px dashed var(--accent); outline-offset: 8px; border-radius: 14px; }
 
     .ov-grid { display: grid; grid-template-columns: minmax(0,1.1fr) minmax(0,1fr); gap: 18px; }
@@ -230,6 +232,9 @@
     .ov-kv-v.hidden-val { letter-spacing: 2px; }
     .ov-reveal { margin-left: 8px; padding: 1px 8px; font: 600 10px var(--mono); text-transform: uppercase; letter-spacing: .08em; border: 1px solid var(--border); background: transparent; color: var(--text-muted); border-radius: 4px; cursor: pointer; transition: .15s; vertical-align: middle; }
     .ov-reveal:hover { border-color: var(--accent); color: var(--accent); }
+    .ov-kv-sub { color: var(--text-muted); font-size: 10px; margin-left: 6px; letter-spacing: .03em; }
+    .ov-kv-v.ov-sha { font-size: 11px; line-height: 1.4; color: var(--accent); }
+    .ov-sha-stale { display: inline-block; margin-left: 8px; padding: 0 6px; font: 600 9px var(--mono); text-transform: uppercase; letter-spacing: .06em; color: #e0a419; border: 1px solid rgba(224,164,25,.4); border-radius: 4px; cursor: help; }
 
     /* Manufacturer */
     .ov-mfr { display: flex; gap: 18px; align-items: stretch; }
@@ -1383,6 +1388,7 @@
           </div>
           <button class="ov-nav-btn hidden" id="ovPrevStudy" title="Previous study">◀</button>
           <button class="ov-nav-btn hidden" id="ovNextStudy" title="Next study">▶</button>
+          <button class="ov-print-btn" id="ovPrintBtn" title="Print / save this overview as a PDF">🖨 Print</button>
           <button class="ov-open-btn" id="ovOpenBtn" title="Open another DICOM file">＋ Open</button>
         </div>
 
@@ -1559,6 +1565,7 @@
           <button id="addTagBtn" class="btn" title="Add a new tag to this file">+ Tag</button>
           <button id="exportJsonBtn" class="btn" title="Export tags as JSON">JSON</button>
           <button id="exportCsvBtn" class="btn" title="Export tags as CSV">CSV</button>
+          <button id="printTagsBtn" class="btn" title="Print / save all tags as a PDF">🖨 Print</button>
           <div class="actions-spacer"></div>
           <button id="downloadAllBtn" class="btn primary hidden">⬇ Download All</button>
           <div id="batchButtons" class="hidden" style="display:flex;align-items:center;gap:6px"></div>
@@ -3016,6 +3023,115 @@ function applyPrefixToAll(newP) {
 }
 
 // ============ RENDERING ============
+// ============================ Branded print / PDF ============================
+// Shared report generator. Light "paper" palette + logo header borrowed from the
+// General Quotation document so every Carino export looks like one family.
+// Self-contained (system fonts, inline CSS, logo as data-URI) → prints offline.
+const _pesc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+let CARINO_LOGO_URI = '';
+(function loadCarinoLogo() {
+  try {
+    fetch('logo.webp').then(r => r.ok ? r.blob() : null).then(b => {
+      if (!b) return; const fr = new FileReader();
+      fr.onload = () => { CARINO_LOGO_URI = fr.result; }; fr.readAsDataURL(b);
+    }).catch(() => {});
+  } catch (_) {}
+})();
+
+// Build + print a branded document from a body-HTML fragment.
+function carinoBrandedPrint({ title, subtitle, meta, body }) {
+  const logo = CARINO_LOGO_URI ? `<img class="ph-logo" src="${CARINO_LOGO_URI}" alt="Carino Systems">` : '';
+  const metaHtml = meta ? `<div class="ph-meta">${meta}</div>` : '';
+  const doc = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${_pesc(title)}</title><style>
+    :root{ --primary:#b45309; --ink:#1f2937; --muted:#6b7280; --border:#e5e7eb; }
+    html{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+    *{box-sizing:border-box;} body{font:12px/1.5 'IBM Plex Sans',-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:var(--ink);margin:24px;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+    .ph{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;border-bottom:2px solid var(--primary);padding-bottom:16px;margin-bottom:20px;}
+    .ph h1{font-family:'Red Hat Display','IBM Plex Sans',sans-serif;font-weight:900;font-size:20px;letter-spacing:.01em;margin:0;color:var(--primary);}
+    .ph-date{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;color:var(--muted);margin:6px 0 0;}
+    .ph-r{text-align:right;flex-shrink:0;}
+    .ph-logo{height:52px;width:auto;display:inline-block;}
+    .ph-meta{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:10px;color:var(--muted);margin-top:8px;line-height:1.5;}
+    .ov-shot{display:block;max-width:340px;max-height:340px;margin:0 auto 18px;border:1px solid var(--border);background:#000;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+    section{margin-bottom:16px;break-inside:avoid;}
+    /* Long tag table must be allowed to flow across pages (else the whole
+       break-inside:avoid section is pushed to page 2, leaving page 1 blank). */
+    section.tagsec{break-inside:auto;}
+    table.tags thead{display:table-header-group;} table.tags tr{break-inside:avoid;}
+    h2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--primary);border-bottom:1px solid var(--border);padding-bottom:5px;margin:0 0 8px;}
+    table{width:100%;border-collapse:collapse;}
+    th{text-align:left;font-weight:600;color:#374151;vertical-align:top;padding:3px 10px 3px 0;font-size:11px;word-break:break-word;}
+    td{vertical-align:top;padding:3px 8px 3px 0;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;word-break:break-word;color:var(--ink);}
+    td.empty{color:#b8bcc4;}
+    /* KV (label/value) sections */
+    table.kv th{width:38%;}
+    /* Full tag table */
+    table.tags{margin-top:2px;} table.tags thead th{border-bottom:2px solid var(--border);text-transform:uppercase;letter-spacing:.05em;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;color:var(--muted);padding:5px 8px 5px 0;}
+    table.tags tbody td{border-bottom:1px solid #f0f0f0;padding:3px 8px 3px 0;}
+    table.tags .c-tag{white-space:nowrap;color:var(--primary);width:96px;}
+    table.tags .c-vr{color:var(--muted);width:34px;text-align:center;}
+    table.tags .c-desc{font-family:'IBM Plex Sans',sans-serif;color:#374151;}
+    .ed{font-family:sans-serif;font-size:9px;color:#127a2f;border:1px solid #9ad3aa;border-radius:3px;padding:0 4px;margin-left:5px;}
+    .ok{color:#127a2f;font-weight:600;} .valcounts{font-size:11px;color:var(--muted);margin:0 0 6px;}
+    .valtable th{width:70px;text-transform:uppercase;font-size:10px;color:#a03000;}
+    .adv{border:1px solid var(--border);border-left-width:4px;padding:8px 12px;margin:0 0 16px;font-size:11px;border-radius:4px;}
+    .adv-info{border-left-color:#2b8fce;background:#eff8ff;} .adv-warn{border-left-color:#d99000;background:#fff8e8;} .adv-danger{border-left-color:#cc2b2b;background:#fdeeee;}
+    footer{margin-top:22px;padding-top:8px;border-top:1px solid var(--border);font-size:10px;color:#9aa0a8;}
+    @media print{body{margin:0;} @page{margin:15mm;}}
+  </style></head><body>
+    <header class="ph"><div class="ph-l"><h1>${_pesc(title)}</h1>${subtitle ? `<p class="ph-date">${_pesc(subtitle)}</p>` : ''}</div>
+      <div class="ph-r">${logo}${metaHtml}</div></header>
+    ${body}
+    <footer>Generated locally by Carino Systems — no data left this device.</footer>
+  </body></html>`;
+
+  const ifr = document.createElement('iframe');
+  ifr.setAttribute('aria-hidden', 'true');
+  ifr.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
+  document.body.appendChild(ifr);
+  const w = ifr.contentWindow, d = w.document;
+  d.open(); d.write(doc); d.close();
+  const cleanup = () => setTimeout(() => { try { ifr.remove(); } catch (_) {} }, 500);
+  w.onafterprint = cleanup;
+  const go = () => { try { w.focus(); w.print(); } catch (_) { cleanup(); } };
+  const img = d.querySelector('img.ov-shot');
+  if (img && !img.complete) { img.onload = go; img.onerror = go; }
+  else setTimeout(go, 60);
+}
+window.carinoBrandedPrint = carinoBrandedPrint;
+
+// Print EVERY tag (meta + dataset) of the current file, with descriptions + values.
+function printAllTags() {
+  if (!dict) { if (window.toast) toast('Open a DICOM file first'); return; }
+  const isHex = t => t.startsWith('x') || /^[0-9a-f]{8}$/i.test(t);
+  const metaEntries = Object.entries(meta || {}).filter(([t]) => isHex(t));
+  const entries = [...metaEntries, ...Object.entries(dict)].filter(([t]) => isHex(t));
+  entries.sort(([a], [b]) => a.localeCompare(b));
+
+  const rows = entries.map(([tag, el]) => {
+    const vr = el.vr || vrForTag(tag) || '';
+    const desc = descFor(tag) || 'Unknown tag';
+    // pendingEdits is seeded with every tag's value at load, so it isn't an
+    // "edited" signal — a row is edited only when the pending value differs.
+    const orig = elToString(el);
+    const val = pendingEdits.has(tag) ? pendingEdits.get(tag).valueString : orig;
+    const edited = val !== orig;
+    const v = val === '' ? '<span class="empty">—</span>' : _pesc(val);
+    return `<tr><td class="c-tag">${_pesc(fmtTag(tag))}</td><td class="c-desc">${_pesc(desc)}</td><td class="c-vr">${_pesc(vr)}</td><td>${v}${edited ? '<span class="ed">edited</span>' : ''}</td></tr>`;
+  }).join('');
+
+  const fileName = files[currentFileIdx]?.name || 'DICOM file';
+  const now = new Date();
+  const p2 = n => String(n).padStart(2, '0');
+  const stamp = now.getFullYear() + '-' + p2(now.getMonth()+1) + '-' + p2(now.getDate()) + ' ' + p2(now.getHours()) + ':' + p2(now.getMinutes());
+  const body = `<section class="tagsec"><h2>All DICOM tags — ${entries.length}</h2>
+    <table class="tags"><thead><tr><th class="c-tag">Tag</th><th class="c-desc">Description</th><th class="c-vr">VR</th><th>Value</th></tr></thead>
+    <tbody>${rows}</tbody></table></section>`;
+  carinoBrandedPrint({ title: 'DICOM Tag Dump', subtitle: `${fileName} · ${entries.length} tags · generated ${stamp}`, meta: 'Carino DICOM Editor', body });
+}
+window.printAllTags = printAllTags;
+document.getElementById('printTagsBtn')?.addEventListener('click', printAllTags);
+
 function renderTable() {
   if (!dict) { tagBody.innerHTML = ''; return; }
 
@@ -3810,6 +3926,37 @@ function syncToUI() {
   }
 }
 
+// ============ FILE INTEGRITY (SHA-256 of the file as loaded) ============
+// The hash is of the ORIGINAL uploaded bytes, so it matches `sha256sum file.dcm`
+// on disk — useful for chain-of-custody / verifying a download. It is immutable
+// per file; edits never change it (they'd change what an EXPORT hashes to, which
+// is a different thing), so we surface a "working copy edited" note when dirty.
+const SHA_AUTO_LIMIT = 64 * 1024 * 1024;   // hash on load below this; button above
+let datasetDirty = false;                  // any edit/anonymize/randomize this session
+
+async function sha256Hex(buf) {
+  const h = await crypto.subtle.digest('SHA-256', buf);
+  return [...new Uint8Array(h)].map(x => x.toString(16).padStart(2, '0')).join('');
+}
+
+// Compute (and cache) a file entry's hash. `buf` may be passed to avoid re-reading.
+async function computeEntrySha(entry, buf) {
+  if (!entry || entry.shaState === 'computing') return;
+  entry.shaState = 'computing';
+  if (typeof renderOverview === 'function' && files[currentFileIdx] === entry) { try { renderTechRow(); } catch (_) {} }
+  try {
+    const data = buf || (entry.file ? await entry.file.arrayBuffer() : null);
+    entry.sha = data ? await sha256Hex(data) : null;
+    entry.shaState = entry.sha ? 'done' : 'unavailable';
+  } catch (_) { entry.sha = null; entry.shaState = 'unavailable'; }
+  if (files[currentFileIdx] === entry) { try { renderTechRow(); } catch (_) {} }
+}
+// Re-render just the Technical card (defined inside the overview IIFE) if present.
+function renderTechRow() { if (typeof window.__ovRenderTech === 'function') window.__ovRenderTech(); }
+
+// Kick off hashing from a deferred (large-file) button.
+window.__computeSha = function () { computeEntrySha(files[currentFileIdx]); };
+
 // ============ FILE HANDLING ============
 async function handleFiles(list) {
   files = [];
@@ -3827,6 +3974,7 @@ async function handleFiles(list) {
   errorBanner.className = 'hidden';
   editHistory = [];
   editFuture  = [];
+  datasetDirty = false;
   dropZone.classList.remove('compact');
 
   const arr = Array.from(list || []);
@@ -3843,7 +3991,11 @@ async function handleFiles(list) {
       const buf = await file.arrayBuffer();
       const msg = DicomMessage.readFile(buf);
       normBin(msg.dict);
-      files.push({ name: file.name, dict: msg.dict, meta: msg.meta || {} });
+      // Retain a handle to the original File (cheap — not the bytes) so the
+      // loaded-file hash can be (re)computed on demand; hash small files now.
+      const entry = { name: file.name, dict: msg.dict, meta: msg.meta || {}, file, size: file.size, sha: null, shaState: file.size <= SHA_AUTO_LIMIT ? 'idle' : 'deferred' };
+      files.push(entry);
+      if (entry.shaState === 'idle') computeEntrySha(entry, buf);   // fire-and-forget
       log(`✓ ${file.name}`);
     } catch (e) {
       const errMsg = e.message || String(e);
@@ -4937,7 +5089,9 @@ function pushHistory() {
   editHistory.push(snapshotEdits());
   if (editHistory.length > 30) editHistory.shift();
   editFuture = [];
+  datasetDirty = true;          // batch mutation (anonymize / randomize / remap)
   updateHistoryBtns();
+  try { renderTechRow(); } catch (_) {}
 }
 function updateHistoryBtns() {
   undoBtn.disabled = editHistory.length === 0;
@@ -4966,6 +5120,7 @@ redoBtn.addEventListener('click', performRedo);
 
 // Debounced per-keystroke snapshot (groups rapid typing into one undo step)
 function trackEditStart() {
+  if (!datasetDirty) { datasetDirty = true; try { renderTechRow(); } catch (_) {} }
   if (preEditSnapshot === null) preEditSnapshot = snapshotEdits();
   clearTimeout(editDebounceTimer);
   editDebounceTimer = setTimeout(() => {
@@ -5914,6 +6069,28 @@ document.addEventListener('keydown', e => {
     if (tgl) tgl.addEventListener('click', () => { localStorage.setItem(PN_KEY, patientShown() ? '0' : '1'); renderCore(); });
   }
 
+  // SHA-256 (file as loaded) row — reflects the file's own bytes, not the
+  // in-memory dataset. States: idle/computing/done/deferred/unavailable.
+  function shaRowHtml() {
+    const entry = files[currentFileIdx];
+    let cell;
+    if (!entry || entry.shaState === 'unavailable' || (!entry.file && !entry.sha)) {
+      cell = `<span class="ov-kv-v empty">unavailable</span>`;
+    } else if (entry.shaState === 'computing') {
+      cell = `<span class="ov-kv-v">computing…</span>`;
+    } else if (entry.shaState === 'deferred') {
+      const mb = (entry.size / 1048576).toFixed(1);
+      cell = `<span class="ov-kv-v"><button class="ov-reveal" onclick="window.__computeSha()">Compute — ${mb} MB</button></span>`;
+    } else if (entry.sha) {
+      const note = (typeof datasetDirty !== 'undefined' && datasetDirty)
+        ? ` <span class="ov-sha-stale" title="You have edited the working copy this session. This hash is still the ORIGINAL file's — an exported/edited file will hash differently.">working copy edited</span>` : '';
+      cell = `<span class="ov-kv-v ov-sha">${esc(entry.sha)}${note}</span>`;
+    } else {
+      cell = `<span class="ov-kv-v empty">—</span>`;
+    }
+    return `<div class="ov-kv-row"><span class="ov-kv-k">SHA-256 <span class="ov-kv-sub">file as loaded</span></span>${cell}</div>`;
+  }
+
   function renderTech() {
     const tech = $('ovTech'); if (!tech) return;
     const r = lookupTag(dict,'00280010')?.Value?.[0], c = lookupTag(dict,'00280011')?.Value?.[0];
@@ -5926,8 +6103,11 @@ document.addEventListener('keydown', e => {
       kvRow('Window Center', txt('00281050')) +
       kvRow('Window Width', txt('00281051')) +
       kvRow('Specific Character Set', txt('00080005')) +
-      kvRow('Rows × Columns', r && c ? `${r} × ${c}` : '');
+      kvRow('Rows × Columns', r && c ? `${r} × ${c}` : '') +
+      shaRowHtml();
   }
+  // Let the global hash pipeline refresh just this card when a hash resolves.
+  window.__ovRenderTech = function () { if (dict) renderTech(); };
 
   // ---------- equipment / manufacturer ----------
   const slug = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -6155,6 +6335,91 @@ document.addEventListener('keydown', e => {
     // stopPropagation so the global window 'drop' handler doesn't also fire (double-load).
     ovContent.addEventListener('drop', e => { e.preventDefault(); e.stopPropagation(); ovContent.classList.remove('ov-dragover'); if (e.dataTransfer?.files?.length) handleFiles(e.dataTransfer.files); });
   }
+
+  // ---------- print / export overview as PDF ----------
+  // Builds a clean, light-theme report from the same data the overview shows and
+  // hands it to the browser's print dialog (→ "Save as PDF"). No library needed,
+  // works fully offline.
+  function ovReportSections() {
+    const r = lookupTag(dict,'00280010')?.Value?.[0], c = lookupTag(dict,'00280011')?.Value?.[0];
+    const name = txt('00100010');
+    const pn = name ? (patientShown() ? name : '•••••••• (hidden on screen)') : '';
+    return [
+      { title: 'Featured — clinical', rows: [
+        ['Patient Name', pn], ['Patient ID', txt('00100020')], ['Sex', txt('00100040')],
+        ['Age', txt('00101010')], ['Modality', txt('00080060')], ['Study Description', txt('00081030')],
+        ['Study Date', fmtDate(txt('00080020'))], ['Series Description', txt('0008103E')], ['Body Part', txt('00180015')]
+      ]},
+      { title: 'Technical', rows: [
+        ['SOP Instance UID', txt('00080018')], ['Transfer Syntax UID', metaTxt('00020010')],
+        ['Photometric Interpretation', txt('00280004')], ['Image Position (Patient)', txt('00200032')],
+        ['Pixel Spacing', txt('00280030')], ['Window Center', txt('00281050')], ['Window Width', txt('00281051')],
+        ['Specific Character Set', txt('00080005')], ['Rows × Columns', r && c ? `${r} × ${c}` : ''],
+        ['SHA-256 (file as loaded)', (() => {
+          const e = files[currentFileIdx];
+          if (!e || !e.sha) return e && e.shaState === 'deferred' ? '(not computed — large file)' : '';
+          return e.sha + ((typeof datasetDirty !== 'undefined' && datasetDirty) ? '  — note: working copy edited this session; an exported file will differ' : '');
+        })()]
+      ]},
+      { title: 'RIS / Workflow', rows: [
+        ['Accession Number', risVal('00080050')], ['Study ID', txt('00200010')],
+        ['Referring Physician', txt('00080090')], ['Requesting Physician', txt('00321032')],
+        ['Requesting Service', txt('00321033')], ['Requested Procedure ID', risVal('00401001')],
+        ['Requested Procedure Desc.', txt('00321060')], ['Scheduled Step ID', risVal('00400009')],
+        ['Scheduled Step Desc.', risVal('00400007')], ['Performed Step ID', txt('00400253')],
+        ['Reason for Request', txt('00401002') || txt('00321030')], ['Admission ID', txt('00380010')],
+        ['Performing Physician', txt('00081050')], ['Operators', txt('00081070')]
+      ]},
+      { title: 'Equipment', rows: [
+        ['Manufacturer', txt('00080070')], ['Model', txt('00081090')], ['Station Name', txt('00081010')],
+        ['Institution', txt('00080080')], ['Software Versions', txt('00181020')], ['Device Serial', txt('00181000')]
+      ]}
+    ];
+  }
+
+  function printOverview() {
+    if (!dict) { if (window.toast) toast('Open a DICOM file first'); return; }
+    const fileName = files[currentFileIdx]?.name || 'DICOM study';
+    const now = new Date();
+    const stamp = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0') + '-' + String(now.getDate()).padStart(2,'0') +
+                  ' ' + String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
+
+    // rendered image (if any) — export the current canvas as PNG
+    let imgTag = '';
+    try { if (ovRaw && canvas && canvas.width) imgTag = `<img class="ov-shot" src="${canvas.toDataURL('image/png')}" alt="DICOM image">`; } catch (_) {}
+
+    const sectionHtml = ovReportSections().map(sec => {
+      const rows = sec.rows.map(([k, v]) =>
+        `<tr><th>${esc(k)}</th><td${v ? '' : ' class="empty"'}>${v ? esc(v) : '—'}</td></tr>`).join('');
+      return `<section><h2>${esc(sec.title)}</h2><table class="kv">${rows}</table></section>`;
+    }).join('');
+
+    // validation summary
+    let valHtml = '';
+    try {
+      const issues = validateDicom(dict, meta) || [];
+      if (!issues.length) {
+        valHtml = `<section><h2>Validation</h2><p class="ok">✓ No conformance issues found</p></section>`;
+      } else {
+        const cnt = s => issues.filter(i => i.sev === s).length;
+        const badges = `<p class="valcounts">${cnt('error')} error(s) · ${cnt('warning')} warning(s) · ${cnt('phi')} PHI flag(s) · ${cnt('info')} info</p>`;
+        const list = issues.slice(0, 60).map(iss =>
+          `<tr><th>${esc(iss.sev.toUpperCase())}</th><td>${esc(fmtTag('x'+iss.tag.toLowerCase()))} ${esc(iss.desc)}${iss.msg && iss.sev!=='phi' ? ' — '+esc(iss.msg) : ''}</td></tr>`).join('');
+        const more = issues.length > 60 ? `<tr><th></th><td>+${issues.length-60} more…</td></tr>` : '';
+        valHtml = `<section><h2>Validation</h2>${badges}<table class="valtable">${list}${more}</table></section>`;
+      }
+    } catch (_) {}
+
+    const body = `${imgTag}${sectionHtml}${valHtml}`;
+    carinoBrandedPrint({
+      title: 'DICOM Study Overview',
+      subtitle: `${fileName} · generated ${stamp}`,
+      meta: 'Carino DICOM Editor',
+      body
+    });
+  }
+  $('ovPrintBtn')?.addEventListener('click', printOverview);
+  window.printOverview = printOverview;
 
   // ---------- render entry point ----------
   let renderedIdx = -1;

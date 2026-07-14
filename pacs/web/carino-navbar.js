@@ -63,7 +63,7 @@
     + '</div></div>'
     + '<div class="cn-right">'
     + '<div class="social-row">'
-    + '<a href="https://github.com/MiguelCarino" target="_blank" rel="noopener" class="icon-btn" title="GitHub" aria-label="GitHub"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="' + GH + '"></path></svg></a>'
+    + '<a href="https://github.com/MiguelCarino/Carino-PACS" target="_blank" rel="noopener" class="icon-btn" title="GitHub" aria-label="GitHub"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="' + GH + '"></path></svg></a>'
     + '<a href="https://www.linkedin.com/in/miguelcarino94/" target="_blank" rel="noopener" class="icon-btn" title="LinkedIn" aria-label="LinkedIn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="' + LI + '"></path><rect x="2" y="9" width="4" height="12"></rect><circle cx="4" cy="4" r="2"></circle></svg></a>'
     + '</div>'
     + '</div>'
