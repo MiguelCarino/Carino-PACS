@@ -51,10 +51,14 @@ CR = 0x0D          # carriage return, terminates the frame
 
 # Fields we lift out of an HL7 order and keep on an order record.  Names match
 # the identity dict used by the ingest/pending pipeline so a matched order can
-# later coerce a study's tags with no translation layer.
+# later coerce a study's tags with no translation layer.  The scheduling fields
+# (station_aet … study_uid) feed the Modality Worklist and make study↔order
+# matching exact — see docs/ris-emergency-design.md.
 ORDER_FIELDS = (
     "accession", "patient_id", "patient", "patient_name",
+    "patient_birthdate", "patient_sex",
     "study_desc", "modality", "scheduled_dt", "referring", "priority",
+    "station_aet", "station_name", "sps_id", "procedure_id", "study_uid",
 )
 
 
@@ -148,11 +152,18 @@ def parse_order(msg: HL7Message) -> dict:
         "patient_id": msg.component("PID", 3, 1),
         "patient_name": msg.field("PID", 5),
         "patient": _fmt_hl7_name(msg.field("PID", 5), msg.comp_sep),
+        "patient_birthdate": msg.field("PID", 7),  # DICOM DA (YYYYMMDD)
+        "patient_sex": msg.field("PID", 8),        # M | F | O
         "study_desc": msg.component("OBR", 4, 2) or msg.component("OBR", 4, 1),
         "modality": msg.field("OBR", 24),          # Diagnostic Serv Sect ID (US, CT, MR…)
         "scheduled_dt": msg.field("OBR", 7) or msg.field("ORC", 9),
         "referring": _fmt_hl7_name(msg.field("OBR", 16) or msg.field("ORC", 12), msg.comp_sep),
         "priority": msg.component("OBR", 27, 6) or msg.field("ORC", 7),
+        # Placer/filler order numbers double as procedure/step ids for MWL.
+        "procedure_id": msg.field("OBR", 2) or msg.field("ORC", 2),
+        "sps_id": msg.field("OBR", 2) or msg.field("ORC", 2),
+        # station_aet / station_name / study_uid: not carried by ORM — the
+        # operator picks the target modality; study_uid is generated on add().
     }
     return order
 
@@ -231,6 +242,11 @@ class OrderStore:
         order = {k: str(fields.get(k, "") or "").strip() for k in ORDER_FIELDS}
         if not order.get("patient") and order.get("patient_name"):
             order["patient"] = _fmt_hl7_name(order["patient_name"])
+        # Generate the Study Instance UID up front: the modality burns THIS UID
+        # into the exam (via MWL) and a wrapped capture inherits it, so study↔
+        # order matching later is exact instead of fuzzy.
+        if not order.get("study_uid"):
+            order["study_uid"] = _gen_uid()
         order.update({
             "id": oid,
             "status": "open",
@@ -309,17 +325,25 @@ class OrderStore:
         return len(closed)
 
     # ---- matching ----------------------------------------------------------
-    def match(self, accession: str, patient_id: str = "") -> Optional[dict]:
-        """Find an OPEN order for an incoming study. Accession is the primary
-        key (the value the tech typed into the modality); Patient ID is the
-        opt-in fallback. Returns a copy of the matched order or None.
+    def match(self, accession: str = "", patient_id: str = "", study_uid: str = "") -> Optional[dict]:
+        """Find an OPEN order for an incoming study, strongest key first:
 
-        Note: does not close the order — the caller decides (so a dry 'would
-        this match?' check is possible)."""
+          1. **Study Instance UID** — exact, since we generate it on the order
+             and the exam (via MWL) or a wrapped capture carries it. Always used.
+          2. **Accession Number** — the value the tech typed into the modality.
+          3. **Patient ID** — opt-in fallback (``match_on='accession_or_patient'``).
+
+        Returns a copy of the matched order or None. Does not close it — the
+        caller decides (so a dry 'would this match?' check is possible)."""
+        su = _norm(study_uid)
         acc = _norm(accession)
         pid = _norm(patient_id)
         with self._lock:
             opens = [o for o in self._orders.values() if o.get("status") == "open"]
+        if su:
+            for o in opens:
+                if _norm(o.get("study_uid")) == su:
+                    return dict(o)
         if acc:
             for o in opens:
                 if _norm(o.get("accession")) == acc:
@@ -338,6 +362,13 @@ class OrderStore:
             "closed": sum(1 for o in vals if o.get("status") == "closed"),
             "total": len(vals),
         }
+
+
+def _gen_uid() -> str:
+    """A valid DICOM Study Instance UID. Lazy pydicom import keeps this module's
+    top level dependency-free (HL7/MLLP needs no DICOM stack)."""
+    from pydicom.uid import generate_uid
+    return str(generate_uid())
 
 
 def _norm(v) -> str:

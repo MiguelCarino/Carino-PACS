@@ -8,12 +8,39 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <!-- Carino navbar self-injects at the top of <body> -->
+  <!-- Carino navbar self-injects at the top of <body>; #netInfo relocates into it -->
   <script src="carino-navbar.js" data-app="PACS" defer></script>
+  <div class="net-info" id="netInfo" data-carino-actions>Checking network…</div>
 
   <main class="wrap">
-    <!-- ── Live status: receiver + auto-send ─────────────────────────── -->
-    <section class="cards">
+    <!-- Low-disk warning (hidden unless the storage volume is low) -->
+    <div class="disk-warn" id="diskWarn" hidden></div>
+    <!-- Emergency-failover banner (hidden unless triggered/active) -->
+    <div class="emg-banner" id="emgBanner" hidden>
+      <div class="emg-text" id="emgBannerText"></div>
+      <div class="emg-actions" id="emgBannerActions"></div>
+    </div>
+
+    <div class="shell">
+      <!-- Left nav: Services + workspaces; each expands in the pane on the right -->
+      <nav class="sidebar" id="sidebar">
+        <button class="navbtn active" data-panel="dlgServices"><span class="nav-ico">🖥</span> Services</button>
+        <button class="navbtn" data-panel="dlgHistory"><span class="nav-ico">🗂</span> History</button>
+        <button class="navbtn" data-panel="dlgOrders"><span class="nav-ico">📋</span> Orders<span class="badge" id="ordersBadge" hidden>0</span></button>
+        <button class="navbtn" data-panel="dlgPending"><span class="nav-ico">📎</span> Pending<span class="badge" id="pendingBadge" hidden>0</span></button>
+        <button class="navbtn" data-panel="dlgStuck"><span class="nav-ico">⚠</span> Stuck<span class="badge warn" id="stuckBadge" hidden>0</span></button>
+        <button class="navbtn" data-panel="dlgDests"><span class="nav-ico">🌐</span> Destinations</button>
+        <button class="navbtn" data-panel="dlgSettings"><span class="nav-ico">⚙</span> Settings</button>
+        <button class="navbtn" data-panel="dlgLogs"><span class="nav-ico">📄</span> Logs</button>
+      </nav>
+
+      <div id="workspace">
+
+        <!-- Services (default) — live status cards -->
+        <section class="panel workpanel" id="dlgServices">
+          <header class="modal-head"><h2>Services <small>receive · send · worklist</small></h2></header>
+          <div class="modal-body">
+            <section class="cards">
       <article class="card" id="receiverCard">
         <header class="card-head">
           <div class="card-title"><span class="dot" id="rxDot"></span> Receiver <small>Storage SCP</small></div>
@@ -77,34 +104,31 @@
         </dl>
         <div class="drop-hint">orders appear under 📋 Orders — key the accession into the modality to match</div>
       </article>
-    </section>
 
-    <!-- ── This machine's network identity ──────────────────────────── -->
-    <div class="net-info" id="netInfo">Checking network…</div>
-
-    <!-- ── Low-disk warning (hidden unless the storage volume is low) ── -->
-    <div class="disk-warn" id="diskWarn" hidden></div>
-
-    <!-- ── Tab strip: each button reveals its panel in the workspace ── -->
-    <nav class="actions-row" id="tabStrip">
-      <button class="btn action tabbtn active" id="openHistory" data-panel="dlgHistory">🗂 History</button>
-      <button class="btn action tabbtn" id="openOrders" data-panel="dlgOrders">📋 Orders<span class="badge" id="ordersBadge" hidden>0</span></button>
-      <button class="btn action tabbtn" id="openPending" data-panel="dlgPending">📎 Pending<span class="badge" id="pendingBadge" hidden>0</span></button>
-      <button class="btn action tabbtn" id="openStuck" data-panel="dlgStuck">⚠ Stuck<span class="badge warn" id="stuckBadge" hidden>0</span></button>
-      <button class="btn action tabbtn" id="openDests" data-panel="dlgDests">🌐 Destinations</button>
-      <button class="btn action tabbtn" id="openSettings" data-panel="dlgSettings">⚙ Settings</button>
-      <button class="btn action tabbtn" id="openLogs" data-panel="dlgLogs">📋 Logs</button>
-    </nav>
-
-    <!-- ── Workspace: the selected tab's content renders inline here ── -->
-    <div id="workspace">
-
-      <!-- History (default) -->
-      <section class="panel workpanel" id="dlgHistory">
-        <header class="modal-head">
-          <h2>Transaction history <small>received &amp; sent studies</small></h2>
-          <button class="modal-x" data-demote aria-label="Close">✕</button>
+      <article class="card" id="mwlCard">
+        <header class="card-head">
+          <div class="card-title"><span class="dot" id="mwDot"></span> Worklist <small>Modality Worklist SCP</small></div>
+          <button class="btn toggle" id="mwToggle" data-on="false">Start</button>
         </header>
+        <dl class="kv">
+          <div><dt>AE title</dt><dd id="mwAet">—</dd></div>
+          <div><dt>Listening</dt><dd id="mwAddr">—</dd></div>
+          <div><dt>Serving</dt><dd id="mwServing">open orders</dd></div>
+          <div><dt>Queries</dt><dd id="mwQueries">0</dd></div>
+          <div><dt>Matches</dt><dd id="mwMatches">0</dd></div>
+          <div><dt>Security</dt><dd id="mwTls">—</dd></div>
+        </dl>
+        <div class="drop-hint">point a modality here as its worklist source — it pulls open orders by C-FIND</div>
+      </article>
+            </section>
+          </div>
+        </section>
+
+        <!-- History -->
+        <section class="panel workpanel" id="dlgHistory" hidden>
+          <header class="modal-head">
+            <h2>Transaction history <small>received &amp; sent studies</small></h2>
+          </header>
         <div class="modal-body">
           <div class="hist-bar">
             <div class="hist-tabs">
@@ -133,7 +157,17 @@
               <label>Accession # <input id="ordAcc" placeholder="the value the tech types into the modality" /></label>
               <label>Patient name <input id="ordPatient" placeholder="e.g. Jane Doe" /></label>
               <label>Patient ID <input id="ordPid" /></label>
+              <label>Date of birth <input id="ordDob" placeholder="YYYY-MM-DD" /></label>
+              <label>Sex
+                <select id="ordSex">
+                  <option value=""></option>
+                  <option value="F">F</option>
+                  <option value="M">M</option>
+                  <option value="O">O</option>
+                </select>
+              </label>
               <label>Modality <input id="ordMod" placeholder="US / CT / MR…" maxlength="16" /></label>
+              <label>Target modality AE <input id="ordStation" placeholder="Scheduled Station AE (worklist filter)" maxlength="16" /></label>
               <label class="wide">Study description <input id="ordDesc" placeholder="e.g. Ultrasound Abdomen" /></label>
               <label>Scheduled <input id="ordWhen" placeholder="YYYY-MM-DD HH:MM" /></label>
               <label>Referring <input id="ordRef" placeholder="ordering physician" /></label>
@@ -202,7 +236,7 @@
           <div class="table-scroll">
             <table class="grid" id="destTable">
               <thead>
-                <tr><th>On</th><th>Name</th><th>Host</th><th>Port</th><th>AE title</th><th>TLS</th><th></th></tr>
+                <tr><th>On</th><th>Name</th><th>Host</th><th>Port</th><th>AE title</th><th>TLS</th><th title="This PACS has no RIS — Carino runs the worklist for it permanently">No RIS</th><th title="Watch this node for emergency failover">🚨</th><th></th></tr>
               </thead>
               <tbody id="destBody"></tbody>
             </table>
@@ -273,6 +307,29 @@
               <p class="hint" style="margin:2px 0 0">Point a print-only modality at this AE / port as its DICOM printer. Each captured film is queued in <em>📎 Pending</em> for you to identify, then Approve to convert to DICOM and forward.</p>
             </fieldset>
             <fieldset>
+              <legend>Emergency failover</legend>
+              <label class="check"><input id="emgArmed" type="checkbox" /> Arm failover — monitor the 🚨 destinations and prompt if one goes offline</label>
+              <label>Probe interval (s) <input id="emgProbe" type="number" min="1" step="1" placeholder="30" /></label>
+              <label>Offline after (s) <input id="emgThreshold" type="number" min="0" step="1" placeholder="120" /></label>
+              <label>Recovery — good probes to declare back <input id="emgRecovery" type="number" min="1" step="1" placeholder="2" /></label>
+              <label class="check"><input id="emgAuto" type="checkbox" /> Activate automatically (skip the prompt)</label>
+              <label class="check"><input id="emgHold" type="checkbox" /> Hold &amp; forward — queue received studies for the primary while active</label>
+              <p class="hint" style="margin:2px 0 0">Tick a destination's 🚨 box (in <em>Destinations</em>) to mark it a primary. When it's unreachable past the threshold you get a pop-up to activate the emergency worklist; studies received meanwhile are held and back-filled when it returns.</p>
+            </fieldset>
+            <fieldset>
+              <legend>Modality Worklist (MWL)</legend>
+              <label class="check"><input id="mwlEnabled" type="checkbox" /> Start the worklist SCP on launch</label>
+              <label>Worklist AE title <input id="mwlAet" maxlength="16" /></label>
+              <label>Bind address <input id="mwlBind" /></label>
+              <label>Port <input id="mwlPort" type="number" min="1" max="65535" placeholder="11114" /></label>
+              <label>Accept only these AEs <input id="mwlAllowed" placeholder="comma-separated, blank = any" /></label>
+              <label class="check"><input id="mwlTls" type="checkbox" /> Serve worklist over TLS</label>
+              <label>TLS certificate (PEM) <input id="mwlTlsCert" placeholder="path to server.crt" /></label>
+              <label>TLS private key (PEM) <input id="mwlTlsKey" placeholder="path to server.key" /></label>
+              <label>Client-cert CA — mutual TLS <input id="mwlTlsCa" placeholder="blank = don't require client certs" /></label>
+              <p class="hint" style="margin:2px 0 0">Point a modality at this AE / port as its <em>Modality Worklist</em> source. It pulls every <em>open</em> order (from 📋 Orders) by C-FIND; set an order's <em>Target modality AE</em> to steer it to one station. The order's Study UID is burned into the exam, so the returned study reconciles exactly.</p>
+            </fieldset>
+            <fieldset>
               <legend>Emergency RIS</legend>
               <label class="check"><input id="risEnabled" type="checkbox" /> Start the HL7/MLLP order listener on launch</label>
               <label>Bind address <input id="risBind" /></label>
@@ -317,14 +374,25 @@
         </div>
       </section>
 
+      </div>
     </div>
   </main>
 
-  <!-- backdrop shown behind a popped-out (overflowing) panel or Settings -->
-  <div id="panelBackdrop" hidden></div>
-
   <!-- global toast -->
   <div class="toast" id="toast" hidden></div>
+
+  <!-- Emergency activation prompt (pops when a primary goes offline) -->
+  <div class="emg-modal" id="emgPrompt" hidden>
+    <div class="emg-modal-card">
+      <h2>⚠ Primary PACS unreachable</h2>
+      <p id="emgPromptMsg"></p>
+      <p class="hint">Activating starts the local <em>Modality Worklist</em> so techs keep scanning, and holds incoming studies to forward when the primary is back. Nothing is sent to the primary until it recovers.</p>
+      <div class="emg-modal-actions">
+        <button class="btn" id="emgActivate">Activate emergency RIS</button>
+        <button class="btn ghost" id="emgDismiss">Not now</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Row template for a study in the history list -->
   <template id="histRowTpl">
@@ -368,6 +436,7 @@
         <div class="order-sub"></div>
       </div>
       <div class="hist-actions">
+        <button class="btn tiny order-capture" title="Relate an exported PDF/image to this order → DICOM → send, then close the order">📎 Capture study</button>
         <button class="btn tiny danger order-cancel" title="Cancel this order (keeps it in Closed for the audit trail)">Cancel</button>
         <button class="btn tiny ghost order-del" title="Delete permanently">Delete</button>
       </div>
@@ -409,6 +478,8 @@
       <td><input class="d-port" type="number" min="1" max="65535" placeholder="104" /></td>
       <td><input class="d-aet" maxlength="16" placeholder="AE" /></td>
       <td style="text-align:center"><input type="checkbox" class="d-tls" title="Connect to this node over TLS" /></td>
+      <td style="text-align:center"><input type="checkbox" class="d-noris" title="This PACS has no RIS — Carino runs the worklist for it permanently" /></td>
+      <td style="text-align:center"><input type="checkbox" class="d-emg" title="Trigger emergency failover if this node goes offline" /></td>
       <td class="row-actions">
         <button class="btn tiny echo" title="C-ECHO test">Echo</button>
         <button class="btn tiny danger del" title="Remove">✕</button>

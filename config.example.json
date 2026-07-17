@@ -36,6 +36,16 @@
     "tls_cert": "",
     "tls_key": ""
   },
+  "mwl": {
+    "enabled": false,
+    "aet": "CARINOMWL",
+    "bind": "0.0.0.0",
+    "port": 11114,
+    "allowed_aets": [],
+    "tls": false,
+    "tls_cert": "",
+    "tls_key": ""
+  },
   "ris": {
     "enabled": false,
     "bind": "0.0.0.0",
@@ -45,6 +55,14 @@
     "auto_close": true,
     "allowed_hosts": []
   },
+  "emergency": {
+    "armed": false,
+    "probe_interval_sec": 30,
+    "offline_threshold_sec": 120,
+    "recovery_successes": 2,
+    "auto_activate": false,
+    "hold_and_forward": true
+  },
   "destinations": [
     {
       "name": "Example PACS",
@@ -52,7 +70,9 @@
       "port": 104,
       "aet": "REMOTEPACS",
       "enabled": false,
-      "tls": false
+      "tls": false,
+      "no_ris": false,
+      "emergency_trigger": false
     }
   ],
   "web": {

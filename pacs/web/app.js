@@ -16,34 +16,31 @@
   // Full loaded config sections — kept so a Save preserves any key that has no
   // form input (min_free_gb, pending_dir, …); apply_config merges over DEFAULTS,
   // so an omitted key would otherwise silently reset.
-  let loadedScp = {}, loadedScu = {}, loadedPrint = {}, loadedRis = {};
+  let loadedScp = {}, loadedScu = {}, loadedPrint = {}, loadedRis = {}, loadedMwl = {}, loadedEmg = {};
   let loadedWeb = { host: "127.0.0.1", port: 8042 };
   let statusTimer = null, logTimer = null;
   let editorUrl = "";                                // DICOM-editor base URL (from status); "" hides ✎ Edit
 
   /* ── Status polling ──────────────────────────────────────────── */
   function renderStatus(s) {
-    const rx = s.receiver, wx = s.watcher, px = s.printer || {}, rs = s.ris || {};
+    const rx = s.receiver, wx = s.watcher, px = s.printer || {}, rs = s.ris || {}, mw = s.mwl || {};
 
     // This machine's network identity (what remote nodes send to).
     const ni = $("netInfo");
     if (ni) {
       ni.textContent = "";
-      // Prefer the full list (multi-homed hosts / device subnets); fall back to
-      // the single primary IP for older engines.
+      // Compact, since this now lives in the top navbar. First IP + count, and
+      // the receiver AE:port (what a modality connects to).
       const ips = (s.host_ips && s.host_ips.length) ? s.host_ips : (s.host_ip ? [s.host_ip] : []);
       if (ips.length) {
         ni.classList.remove("offline");
         const v = (t) => { const el = document.createElement("span"); el.className = "v"; el.textContent = t; return el; };
-        ni.append(ips.length > 1 ? "Reachable at " : "Your IP is ");
-        ips.forEach((ip, i) => { if (i) ni.append(" · "); ni.append(v(ip)); });
-        ni.append(" · AE title ", v(rx.aet), " · port ", v(String(rx.port)));
-        if (px.running || px.enabled) {
-          ni.append(" · print ", v(px.aet), " : ", v(String(px.port)));
-        }
+        ni.append(v(ips[0]));
+        if (ips.length > 1) ni.append(" +" + (ips.length - 1));
+        ni.append(" · ", v(rx.aet + ":" + rx.port));
       } else {
         ni.classList.add("offline");
-        ni.textContent = "You're offline — no network detected";
+        ni.textContent = "offline";
       }
     }
 
@@ -121,6 +118,82 @@
     $("rsRecv").textContent = rs.received || 0;
     $("rsErr").textContent = rs.errors || 0;
     setToggle($("rsToggle"), rs.running);
+
+    setDot($("mwDot"), mw.running);
+    $("mwAet").textContent = mw.aet || "—";
+    $("mwAddr").textContent = `${mw.bind || "0.0.0.0"}:${mw.port || "—"}`;
+    $("mwQueries").textContent = mw.queries || 0;
+    $("mwMatches").textContent = mw.matches || 0;
+    $("mwTls").textContent = mw.tls ? "TLS" : "plaintext";
+    setToggle($("mwToggle"), mw.running);
+
+    renderEmergency(s.emergency || {}, rs, mw);
+  }
+
+  /* ── Emergency failover: banner, activation pop-up, card visibility ──── */
+  let emgPromptShown = false;
+  function renderEmergency(emg, rs, mw) {
+    // The Worklist + Emergency-RIS cards are advanced/emergency services — keep
+    // them off the normal dashboard unless they're running or failover is armed.
+    const rsCard = $("risCard"), mwCard = $("mwlCard");
+    if (rsCard) rsCard.hidden = !((rs && rs.running) || emg.armed);
+    // Worklist card shows when running, armed, or a no_ris destination makes it permanent.
+    if (mwCard) mwCard.hidden = !((mw && (mw.running || mw.wanted)) || emg.armed);
+
+    const banner = $("emgBanner");
+    const state = emg.state || "off";
+    const who = emg.trigger_dest || "primary";
+    if (state === "triggered" || state === "active" || state === "recovering") {
+      banner.hidden = false;
+      banner.className = "emg-banner " + state;
+      let text, actions;
+      if (state === "active") {
+        text = `🚨 EMERGENCY ACTIVE — '${who}' unreachable. Worklist is serving; received studies are held for forward.`;
+        actions = [["Resume normal", "resume", "btn"]];
+      } else if (state === "recovering") {
+        text = `↩ '${who}' is back — flushing held studies to it. Click Resume when done.`;
+        actions = [["Resume normal", "resume", "btn"]];
+      } else {  // triggered (prompt may be dismissed)
+        text = `⚠ Primary '${who}' is unreachable — emergency RIS not activated.`;
+        actions = [["Activate", "activate", "btn"], ["Disarm", "disarm", "btn ghost"]];
+      }
+      $("emgBannerText").textContent = text;
+      const wrap = $("emgBannerActions");
+      wrap.innerHTML = "";
+      actions.forEach(([label, action, cls]) => {
+        const b = document.createElement("button");
+        b.className = cls + " tiny";
+        b.textContent = label;
+        b.addEventListener("click", () => emergencyAction(action));
+        wrap.appendChild(b);
+      });
+    } else {
+      banner.hidden = true;
+    }
+
+    // The activation pop-up — only while triggered and not dismissed.
+    const prompt = $("emgPrompt");
+    if (emg.prompt) {
+      if (!emgPromptShown) {
+        $("emgPromptMsg").textContent =
+          `The primary PACS '${who}' has been unreachable past the failover threshold.`;
+        prompt.hidden = false;
+        emgPromptShown = true;
+      }
+    } else {
+      prompt.hidden = true;
+      emgPromptShown = false;
+    }
+  }
+
+  async function emergencyAction(action) {
+    try {
+      const r = await post("/api/emergency", { action });
+      flashNote(r.message || ("Emergency: " + action), r.ok !== false);
+      $("emgPrompt").hidden = true;
+      emgPromptShown = false;
+      pollStatus();
+    } catch (e) { flashNote(e.message, false); }
   }
   function setToggle(btn, on) {
     btn.dataset.on = String(on);
@@ -148,13 +221,14 @@
       const data = await api("/api/log?since=" + logSeq);
       const box = $("log");
       const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 20;
-      let sawStore = false, sawSend = false, sawPrint = false, sawRis = false;
+      let sawStore = false, sawSend = false, sawPrint = false, sawRis = false, sawMwl = false;
       for (const e of data.entries) {
         logSeq = e.seq;
         if (e.kind === "store") sawStore = true;   // a file was received
         if (e.kind === "send") sawSend = true;      // a file was forwarded
         if (e.kind === "print") sawPrint = true;    // a print job / event
         if (e.kind === "ris") sawRis = true;        // an HL7 order / match event
+        if (e.kind === "mwl") sawMwl = true;        // a worklist query
         const line = document.createElement("div");
         line.className = "line";
         const t = document.createElement("span");
@@ -173,6 +247,7 @@
         if (sawSend) blink($("wxDot"));
         if (sawPrint) blink($("pxDot"));
         if (sawRis) blink($("rsDot"));
+        if (sawMwl) blink($("mwDot"));
       }
       firstLog = false;
     } catch (e) { /* ignore */ }
@@ -185,6 +260,8 @@
     loadedScu = c.scu || {};
     loadedPrint = c.print || {};
     loadedRis = c.ris || {};
+    loadedMwl = c.mwl || {};
+    loadedEmg = c.emergency || {};
     loadedWeb = c.web || loadedWeb;
     $("webEditorUrl").value = (c.web && c.web.editor_url) || "";
     $("scpAet").value = c.scp.aet;
@@ -227,6 +304,23 @@
     $("risMatch").value = ri.match_on === "accession_or_patient" ? "accession_or_patient" : "accession";
     $("risAutoClose").checked = ri.auto_close !== false;
     $("risHosts").value = (ri.allowed_hosts || []).join(", ");
+    const mi = c.mwl || {};
+    $("mwlEnabled").checked = !!mi.enabled;
+    $("mwlAet").value = mi.aet || "CARINOMWL";
+    $("mwlBind").value = mi.bind || "0.0.0.0";
+    $("mwlPort").value = mi.port != null ? mi.port : 11114;
+    $("mwlAllowed").value = (mi.allowed_aets || []).join(", ");
+    $("mwlTls").checked = !!mi.tls;
+    $("mwlTlsCert").value = mi.tls_cert || "";
+    $("mwlTlsKey").value = mi.tls_key || "";
+    $("mwlTlsCa").value = mi.tls_ca || "";
+    const eg = c.emergency || {};
+    $("emgArmed").checked = !!eg.armed;
+    $("emgProbe").value = eg.probe_interval_sec != null ? eg.probe_interval_sec : 30;
+    $("emgThreshold").value = eg.offline_threshold_sec != null ? eg.offline_threshold_sec : 120;
+    $("emgRecovery").value = eg.recovery_successes != null ? eg.recovery_successes : 2;
+    $("emgAuto").checked = !!eg.auto_activate;
+    $("emgHold").checked = eg.hold_and_forward !== false;
     renderDests(c.destinations || []);
     reflowActive();
   }
@@ -246,6 +340,8 @@
     tr.querySelector(".d-port").value = d.port || "";
     tr.querySelector(".d-aet").value = d.aet || "";
     tr.querySelector(".d-tls").checked = !!d.tls;
+    tr.querySelector(".d-noris").checked = !!d.no_ris;
+    tr.querySelector(".d-emg").checked = !!d.emergency_trigger;
     tr.querySelector(".del").addEventListener("click", () => tr.remove());
     tr.querySelector(".echo").addEventListener("click", () => echoRow(tr));
     $("destBody").appendChild(tr);
@@ -259,6 +355,8 @@
         port: parseInt(tr.querySelector(".d-port").value, 10),
         aet: tr.querySelector(".d-aet").value.trim(),
         tls: tr.querySelector(".d-tls").checked,
+        no_ris: tr.querySelector(".d-noris").checked,
+        emergency_trigger: tr.querySelector(".d-emg").checked,
       }))
       .filter((d) => d.host && d.aet && d.port);
   }
@@ -307,6 +405,27 @@
         tls_cert: $("prnTlsCert").value.trim(),
         tls_key: $("prnTlsKey").value.trim(),
         tls_ca: $("prnTlsCa").value.trim(),
+      },
+      mwl: {
+        ...loadedMwl,
+        enabled: $("mwlEnabled").checked,
+        aet: $("mwlAet").value.trim() || "CARINOMWL",
+        bind: $("mwlBind").value.trim() || "0.0.0.0",
+        port: parseInt($("mwlPort").value, 10),
+        allowed_aets: $("mwlAllowed").value.split(",").map((s) => s.trim()).filter(Boolean),
+        tls: $("mwlTls").checked,
+        tls_cert: $("mwlTlsCert").value.trim(),
+        tls_key: $("mwlTlsKey").value.trim(),
+        tls_ca: $("mwlTlsCa").value.trim(),
+      },
+      emergency: {
+        ...loadedEmg,
+        armed: $("emgArmed").checked,
+        probe_interval_sec: parseInt($("emgProbe").value, 10) || 30,
+        offline_threshold_sec: parseInt($("emgThreshold").value, 10) || 0,
+        recovery_successes: parseInt($("emgRecovery").value, 10) || 1,
+        auto_activate: $("emgAuto").checked,
+        hold_and_forward: $("emgHold").checked,
       },
       ris: {
         ...loadedRis,
@@ -751,7 +870,9 @@
       row.querySelector(".order-patient").textContent = o.patient || o.patient_name || "(no patient)";
       row.querySelector(".hist-meta").textContent = [
         o.patient_id ? "ID " + o.patient_id : "",
+        [fmtDate(o.patient_birthdate), o.patient_sex].filter(Boolean).join(" "),
         o.modality || "",
+        o.station_aet ? "→ " + o.station_aet : "",
         o.study_desc || "(no study description)",
         o.scheduled_dt ? "@ " + o.scheduled_dt : "",
       ].filter(Boolean).join("  ·  ");
@@ -762,9 +883,15 @@
       }
       if (o.referring) bits.push("ref: " + o.referring);
       sub.textContent = bits.join("  ·  ");
+      const captureBtn = row.querySelector(".order-capture");
       const cancelBtn = row.querySelector(".order-cancel");
-      if (o.status === "closed") cancelBtn.hidden = true;
-      else cancelBtn.addEventListener("click", () => orderAction("cancel", o, "Cancel this order? It moves to Closed (kept for the audit trail)."));
+      if (o.status === "closed") {
+        captureBtn.hidden = true;
+        cancelBtn.hidden = true;
+      } else {
+        captureBtn.addEventListener("click", () => captureForOrder(o, captureBtn));
+        cancelBtn.addEventListener("click", () => orderAction("cancel", o, "Cancel this order? It moves to Closed (kept for the audit trail)."));
+      }
       row.querySelector(".order-del").addEventListener("click", () =>
         orderAction("delete", o, "Delete this order permanently? This removes it from the audit trail."));
       list.appendChild(row);
@@ -781,7 +908,10 @@
       accession: $("ordAcc").value.trim(),
       patient: $("ordPatient").value.trim(),
       patient_id: $("ordPid").value.trim(),
+      patient_birthdate: $("ordDob").value.trim(),
+      patient_sex: $("ordSex").value,
       modality: $("ordMod").value.trim(),
+      station_aet: $("ordStation").value.trim(),
       study_desc: $("ordDesc").value.trim(),
       scheduled_dt: $("ordWhen").value.trim(),
       referring: $("ordRef").value.trim(),
@@ -795,7 +925,7 @@
       const r = await post("/api/ris/orders", fields);
       flashNote(r.message || "Order queued", r.ok !== false);
       if (r.ok !== false) {
-        ["ordAcc", "ordPatient", "ordPid", "ordMod", "ordDesc", "ordWhen", "ordRef"].forEach((id) => { $(id).value = ""; });
+        ["ordAcc", "ordPatient", "ordPid", "ordDob", "ordSex", "ordMod", "ordStation", "ordDesc", "ordWhen", "ordRef"].forEach((id) => { $(id).value = ""; });
         orderStatus = "open";
         document.querySelectorAll("#dlgOrders .hist-tab").forEach((t) => t.classList.toggle("active", t.dataset.ostatus === "open"));
         loadOrders();
@@ -817,6 +947,32 @@
     } catch (e) { flashNote(e.message, false); }
   }
 
+  // Use-case-B bridge: pick an exported PDF/image and relate it to this order.
+  // The server wraps it as DICOM (inheriting the order's identity + Study UID),
+  // queues it to outgoing, and closes the order.
+  function captureForOrder(o, btn) {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".pdf,.jpg,.jpeg,.png,application/pdf,image/*";
+    input.addEventListener("change", async () => {
+      const f = input.files && input.files[0];
+      if (!f) return;
+      const fd = new FormData();
+      fd.append("id", o.id);
+      fd.append("file", f);
+      const old = btn.textContent; btn.disabled = true; btn.textContent = "…";
+      try {
+        const res = await fetch("/api/ris/orders/capture", { method: "POST", body: fd });
+        let body = {}; try { body = await res.json(); } catch (e) { /* empty */ }
+        flashNote(body.message || (res.ok ? "Study created" : "Capture failed"), res.ok && body.ok !== false);
+        if (res.ok) { loadOrders(); pollStatus(); }
+      } catch (e) {
+        flashNote(e.message, false);
+      } finally { btn.disabled = false; btn.textContent = old; }
+    });
+    input.click();
+  }
+
   async function purgeClosedOrders() {
     if (!confirm("Delete ALL closed orders?\n\nThis permanently clears the closed-order audit trail.")) return;
     try {
@@ -827,68 +983,21 @@
     } catch (e) { flashNote(e.message, false); }
   }
 
-  /* ── Workspace panels: inline tabs that pop out only on overflow ──
-     Settings is ALWAYS a popup. History / Destinations / Logs / Pending /
-     Stuck render inline in the workspace, and auto-promote to a centered
-     popup only when their content is too tall to fit the viewport. Closing
-     the popup (✕ / backdrop / Esc) keeps that panel inline (scrolling) for
-     the rest of this activation. */
-  const INLINE_PANELS = ["dlgHistory", "dlgOrders", "dlgPending", "dlgStuck", "dlgDests", "dlgLogs"];
-  const SETTINGS_PANEL = "dlgSettings";
+  /* ── Sidebar workspace: each nav button expands its panel in the pane ──
+     Every panel renders inline in the viewport-bound workspace and scrolls its
+     own content; there is no popup/backdrop anymore. */
+  const PANELS = ["dlgServices", "dlgHistory", "dlgOrders", "dlgPending", "dlgStuck", "dlgDests", "dlgSettings", "dlgLogs"];
   const loaders = { dlgHistory: loadHistory, dlgOrders: loadOrders, dlgPending: loadPending, dlgStuck: loadStuck };
-  let activeInline = "dlgHistory";
-  let overlayId = null;
-  const dismissed = new Set();
+  let activePanel = "dlgServices";
 
-  function highlightTab(id) {
-    document.querySelectorAll(".tabbtn").forEach((b) => b.classList.toggle("active", b.dataset.panel === id));
+  function showPanel(id) {
+    if (!PANELS.includes(id)) return;
+    activePanel = id;
+    PANELS.forEach((pid) => { const p = $(pid); if (p) p.hidden = pid !== id; });
+    document.querySelectorAll(".navbtn").forEach((b) => b.classList.toggle("active", b.dataset.panel === id));
+    if (loaders[id]) loaders[id]();
   }
-  function setBackdrop(on) { const b = $("panelBackdrop"); if (b) b.hidden = !on; }
-
-  function openOverlay(id) {
-    const p = $(id); if (!p) return;
-    p.hidden = false; p.classList.add("as-modal");
-    overlayId = id; setBackdrop(true);
-  }
-  function closeOverlay() {
-    if (!overlayId) return;
-    const p = $(overlayId);
-    if (p) p.classList.remove("as-modal");
-    if (overlayId === SETTINGS_PANEL) { if (p) p.hidden = true; }
-    else { dismissed.add(overlayId); }   // user prefers inline scroll this time
-    overlayId = null; setBackdrop(false);
-    highlightTab(activeInline);
-  }
-
-  function panelOverflows(id) {
-    // "Overflow" = the content is taller than the panel's inline scroll area
-    // (the CSS max-height on .modal-body). Measured inline only, so it's
-    // independent of viewport quirks and how tall the cards above happen to be.
-    const p = $(id); if (!p || p.hidden || p.classList.contains("as-modal")) return false;
-    const body = p.querySelector(".modal-body"); if (!body) return false;
-    return body.scrollHeight > body.clientHeight + 4;
-  }
-  function maybeOverflow(id) {
-    if (id !== activeInline || overlayId === id || dismissed.has(id)) return;
-    if (panelOverflows(id)) openOverlay(id);
-  }
-  function reflowActive() { maybeOverflow(activeInline); }
-
-  function showInline(id) {
-    closeOverlay();
-    activeInline = id;
-    dismissed.delete(id);
-    INLINE_PANELS.forEach((pid) => { const p = $(pid); if (p) { p.classList.remove("as-modal"); p.hidden = pid !== id; } });
-    $(SETTINGS_PANEL).hidden = true;
-    highlightTab(id);
-    if (loaders[id]) loaders[id]();                     // async panels re-check on render
-    requestAnimationFrame(() => maybeOverflow(id));     // sync panels (Logs/Dests) check now
-  }
-  function showSettings() {
-    $(SETTINGS_PANEL).hidden = false;
-    openOverlay(SETTINGS_PANEL);
-    highlightTab(SETTINGS_PANEL);
-  }
+  function reflowActive() { /* no-op: panels scroll internally now (kept for callers) */ }
 
   /* ── Wire up ─────────────────────────────────────────────────── */
   document.addEventListener("DOMContentLoaded", () => {
@@ -907,23 +1016,21 @@
       if (e.target.dataset.on !== "true") $("risEnabled").checked = true;
       toggle("ris", e.target);
     });
+    $("mwToggle").addEventListener("click", (e) => {
+      if (e.target.dataset.on !== "true") $("mwlEnabled").checked = true;
+      toggle("mwl", e.target);
+    });
+    $("emgActivate").addEventListener("click", () => emergencyAction("activate"));
+    $("emgDismiss").addEventListener("click", () => emergencyAction("dismiss"));
     $("addDest").addEventListener("click", () => addDestRow({ enabled: true }));
-    $("saveCfg").addEventListener("click", () => saveConfig().then((ok) => { if (ok) closeOverlay(); }));
+    $("saveCfg").addEventListener("click", () => saveConfig());
     $("saveDests").addEventListener("click", () => saveConfig());
     $("clearLog").addEventListener("click", () => { $("log").innerHTML = ""; });
     wireDropZones();
 
-    // Tab strip: Settings always pops; the rest render inline (pop out on overflow).
-    document.querySelectorAll(".tabbtn").forEach((b) =>
-      b.addEventListener("click", () => {
-        const id = b.dataset.panel;
-        if (id === SETTINGS_PANEL) showSettings(); else showInline(id);
-      }));
-    // Close an open popup: ✕ button, backdrop click, or Escape.
-    document.querySelectorAll("[data-demote]").forEach((x) => x.addEventListener("click", closeOverlay));
-    $("panelBackdrop").addEventListener("click", closeOverlay);
-    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && overlayId) closeOverlay(); });
-    window.addEventListener("resize", reflowActive);
+    // Sidebar: each button expands its panel in the right-hand pane.
+    document.querySelectorAll(".navbtn").forEach((b) =>
+      b.addEventListener("click", () => showPanel(b.dataset.panel)));
 
     // History Received/Sent sub-tabs.
     document.querySelectorAll(".hist-tab").forEach((tab) =>
@@ -951,7 +1058,11 @@
     $("stuckRetryAll").addEventListener("click", () => retryStuck(null, $("stuckRetryAll")));
 
     loadConfig().catch((e) => flashNote("Load failed: " + e.message, false));
-    showInline("dlgHistory");   // default workspace view
+    // Deep-link: #dlgSettings etc. opens that panel; default is the cards.
+    const fromHash = (location.hash || "").replace("#", "");
+    showPanel(PANELS.includes(fromHash) ? fromHash : "dlgServices");
+    document.querySelectorAll(".navbtn").forEach((b) =>
+      b.addEventListener("click", () => { try { history.replaceState(null, "", "#" + b.dataset.panel); } catch (e) {} }));
     pollStatus();
     pollLog();
     statusTimer = setInterval(pollStatus, 2000);

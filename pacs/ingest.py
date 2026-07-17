@@ -118,13 +118,15 @@ def _base_dataset(sop_class: str, meta: dict):
     # Patient / Study — inherited identity (study_uid keeps it grouped correctly)
     ds.PatientName = _resolve_patient_name(meta)
     ds.PatientID = str(meta.get("patient_id") or "")
+    ds.PatientBirthDate = _norm_date(meta.get("patient_birthdate"))
+    ds.PatientSex = str(meta.get("patient_sex") or "")
     ds.StudyInstanceUID = str(meta.get("study_uid") or "") or generate_uid()
     ds.StudyDate = _norm_date(meta.get("study_date"))
     ds.StudyTime = ""
     ds.AccessionNumber = str(meta.get("accession") or "")
     ds.StudyID = str(meta.get("study_id") or "")
     ds.StudyDescription = str(meta.get("study_desc") or "")
-    ds.ReferringPhysicianName = ""
+    ds.ReferringPhysicianName = str(meta.get("referring") or "")
 
     # Series — always a NEW series so it slots beside the study's imaging series
     ds.SeriesInstanceUID = generate_uid()

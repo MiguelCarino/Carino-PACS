@@ -5,6 +5,7 @@
     python -m pacs send       # folder watcher / auto-forward only, headless
     python -m pacs print      # virtual DICOM print receiver only, headless
     python -m pacs ris        # emergency-RIS HL7/MLLP order listener, headless
+    python -m pacs mwl        # Modality Worklist SCP (serve orders), headless
     python -m pacs echo ...    # C-ECHO connectivity test
     python -m pacs init       # scaffold config.json + folders
 """
@@ -103,6 +104,17 @@ def cmd_serve(args) -> int:
         except Exception as exc:
             server.log.error(f"Could not start RIS listener: {exc}", kind="ris")
             print(f"WARNING: RIS listener did not start: {exc}", file=sys.stderr)
+    if args.mwl or server.worklist_wanted():
+        try:
+            server.start_mwl()
+        except Exception as exc:
+            server.log.error(f"Could not start worklist SCP: {exc}", kind="mwl")
+            print(f"WARNING: worklist SCP did not start: {exc}", file=sys.stderr)
+    # Emergency failover monitor auto-starts if armed in config.
+    try:
+        server.emergency.start()
+    except Exception as exc:
+        server.log.error(f"Could not start emergency monitor: {exc}", kind="emergency")
 
     host = args.host or cfg.web.get("host", "127.0.0.1")
     port = args.port or int(cfg.web.get("port", 8042))
@@ -166,6 +178,18 @@ def cmd_ris(args) -> int:
     return 0
 
 
+def cmd_mwl(args) -> int:
+    cfg = Config(args.config)
+    if args.port:
+        cfg.mwl["port"] = args.port
+    if args.aet:
+        cfg.mwl["aet"] = args.aet
+    server = PacsServer(cfg)
+    server.start_mwl()
+    _block_until_signal(server)
+    return 0
+
+
 def cmd_echo(args) -> int:
     cfg = Config(args.config)
     if args.name:
@@ -212,6 +236,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="also start the virtual DICOM print receiver on launch")
     s.add_argument("--ris", action="store_true", dest="ris",
                    help="also start the emergency-RIS HL7/MLLP listener on launch")
+    s.add_argument("--mwl", action="store_true", dest="mwl",
+                   help="also start the Modality Worklist SCP on launch")
     s.set_defaults(func=cmd_serve)
 
     r = sub.add_parser("receive", help="run the Storage SCP (receiver) headless")
@@ -232,6 +258,11 @@ def build_parser() -> argparse.ArgumentParser:
     rs = sub.add_parser("ris", help="run the emergency-RIS HL7/MLLP order listener headless")
     rs.add_argument("--port", type=int, help="listen port (default 2575)")
     rs.set_defaults(func=cmd_ris)
+
+    mw = sub.add_parser("mwl", help="run the Modality Worklist SCP (serve orders) headless")
+    mw.add_argument("--port", type=int, help="listen port (default 11114)")
+    mw.add_argument("--aet", help="local (worklist) AE title")
+    mw.set_defaults(func=cmd_mwl)
 
     e = sub.add_parser("echo", help="C-ECHO connectivity test")
     e.add_argument("--name", help="destination name from config")

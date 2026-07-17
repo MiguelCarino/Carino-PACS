@@ -12,7 +12,9 @@ import threading
 from typing import Optional
 
 from .config import Config
+from .emergency import EmergencyController
 from .logbuf import LogBuffer
+from .mwl import MwlSCP
 from .print_scp import PrintSCP
 from .ris import OrderStore, RisListener
 from .scp import StorageSCP
@@ -28,6 +30,7 @@ class PacsServer:
         self.scp: Optional[StorageSCP] = None
         self.print_scp: Optional[PrintSCP] = None
         self.ris: Optional[RisListener] = None
+        self.mwl_scp: Optional[MwlSCP] = None
         # The order store is always live (manual entry works even with the HL7
         # listener stopped); the listener is an optional front door onto it.
         self.orders = OrderStore(
@@ -36,6 +39,7 @@ class PacsServer:
             match_on=cfg.ris.get("match_on", "accession"),
         )
         self.watcher = FolderWatcher(cfg, self.log)
+        self.emergency = EmergencyController(self, self.log)
 
     # ---- receiver (Storage SCP) -------------------------------------------
     def start_receiver(self) -> None:
@@ -75,6 +79,20 @@ class PacsServer:
         with self._lock:
             if self.scp:
                 self.scp.stop()
+
+    def _probe(self, dest: dict):
+        """Quiet C-ECHO to a destination for the emergency health monitor —
+        returns (ok, message) without logging (it runs every probe interval)."""
+        from .scu import Destination, c_echo
+        d = Destination.from_dict(dest)
+        ctx = None
+        if d.tls:
+            try:
+                ctx = self._scu_tls_context()
+            except Exception as exc:
+                return False, f"TLS config error: {exc}"
+        res = c_echo(d, self.cfg.scu.get("aet", "CARINOSCU"), tls_context=ctx)
+        return res.ok, res.message
 
     # ---- print receiver (virtual DICOM film printer) ----------------------
     def _ingest_print(self, data: bytes, kind: str, identity: dict, name: str) -> None:
@@ -142,6 +160,48 @@ class PacsServer:
             if self.ris:
                 self.ris.stop()
 
+    # ---- Modality Worklist SCP (serve orders to modalities) ---------------
+    def start_mwl(self) -> None:
+        with self._lock:
+            if self.mwl_scp and self.mwl_scp.running:
+                return
+            m = self.cfg.mwl
+            self.mwl_scp = MwlSCP(
+                aet=m.get("aet", "CARINOMWL"),
+                bind=m.get("bind", "0.0.0.0"),
+                port=int(m.get("port", 11114)),
+                log=self.log,
+                get_orders=lambda: self.orders.list("open"),
+                allowed_aets=m.get("allowed_aets", []),
+                tls=bool(m.get("tls", False)),
+                tls_cert=self.cfg.resolve_path(m.get("tls_cert", "")),
+                tls_key=self.cfg.resolve_path(m.get("tls_key", "")),
+                tls_ca=self.cfg.resolve_path(m.get("tls_ca", "")),
+            )
+            self.mwl_scp.start()
+
+    def stop_mwl(self) -> None:
+        with self._lock:
+            if self.mwl_scp:
+                self.mwl_scp.stop()
+
+    def worklist_wanted(self) -> bool:
+        """True if the Modality Worklist should run as a permanent service: the
+        SCP is explicitly enabled, OR any enabled destination is flagged
+        ``no_ris`` (that PACS has no RIS, so Carino is its worklist source)."""
+        if self.cfg.mwl.get("enabled"):
+            return True
+        return any(d.get("no_ris") for d in self.cfg.enabled_destinations())
+
+    def sync_worklist(self) -> None:
+        """Start the worklist SCP if it's wanted and not already running
+        (called on launch and after a config change)."""
+        if self.worklist_wanted() and not (self.mwl_scp and self.mwl_scp.running):
+            try:
+                self.start_mwl()
+            except Exception as exc:
+                self.log.error(f"Could not start worklist SCP: {exc}", kind="mwl")
+
     def _reconcile_study(self, ds, path: str) -> None:
         """Called for every C-STORE'd instance: try to match it to an open RIS
         order by Accession Number (or Patient ID fallback). On a hit, close +
@@ -149,12 +209,20 @@ class PacsServer:
         instance is already stored; this only reconciles order tracking."""
         accession = str(getattr(ds, "AccessionNumber", "") or "")
         patient_id = str(getattr(ds, "PatientID", "") or "")
-        if not accession and not patient_id:
+        study_uid = str(getattr(ds, "StudyInstanceUID", "") or "")
+        # Hold-and-forward: while emergency failover is active, copy every
+        # received instance into the outgoing folder so the watcher forwards it
+        # to the primary (retrying/holding until it's back). Independent of
+        # whether the study matches an order.
+        if self.emergency.active and self.cfg.emergency.get("hold_and_forward", True):
+            self._queue_for_forward(path)
+        if not accession and not patient_id and not study_uid:
             return
-        order = self.orders.match(accession, patient_id)
+        # Study Instance UID is the strongest key (exact when the exam was made
+        # from a Carino order via MWL); accession / patient id are fallbacks.
+        order = self.orders.match(accession, patient_id, study_uid)
         if not order:
             return
-        study_uid = str(getattr(ds, "StudyInstanceUID", "") or "")
         if self.cfg.ris.get("auto_close", True):
             self.orders.close(order["id"], reason="matched", matched_study=study_uid)
             self.log.info(
@@ -168,6 +236,35 @@ class PacsServer:
                 f"{order.get('patient') or '?'} [acc {order.get('accession') or '—'}]",
                 kind="ris",
             )
+
+    def _queue_for_forward(self, path: str) -> None:
+        """Copy a received instance into the outgoing watch folder so the normal
+        auto-send/retry pipeline forwards it to the primary (used by emergency
+        hold-and-forward). Best-effort — never break the C-STORE on a copy error."""
+        import shutil as _sh
+        try:
+            watch = self.cfg.resolved("scu", "watch_dir")
+            os.makedirs(watch, exist_ok=True)
+            dst = os.path.join(watch, os.path.basename(path))
+            if os.path.abspath(dst) != os.path.abspath(path) and not os.path.exists(dst):
+                _sh.copy2(path, dst)
+        except OSError as exc:
+            self.log.warn(f"Emergency hold-and-forward: could not queue {os.path.basename(path)}: {exc}",
+                          kind="emergency")
+
+    # ---- emergency failover (health monitor + state machine) --------------
+    def emergency_action(self, action: str) -> dict:
+        """Drive the failover state machine from the dashboard."""
+        fn = {
+            "arm": self.emergency.arm,
+            "disarm": self.emergency.disarm,
+            "activate": self.emergency.activate,
+            "dismiss": self.emergency.dismiss,
+            "resume": self.emergency.resume,
+        }.get(action)
+        if not fn:
+            return {"ok": False, "message": "action must be arm|disarm|activate|dismiss|resume"}
+        return {"ok": True, "emergency": fn()}
 
     # ---- RIS orders (CRUD over the store) ---------------------------------
     def list_orders(self, status: Optional[str] = None) -> dict:
@@ -201,6 +298,55 @@ class PacsServer:
         n = self.orders.purge_closed()
         self.log.info(f"Purged {n} closed RIS order(s)", kind="ris")
         return {"ok": True, "removed": n, "message": f"Removed {n} closed order(s)"}
+
+    def create_study_from_order(self, order_id: str, filename: str, data: bytes) -> dict:
+        """Use-case-B bridge: wrap an exported PDF/image as a DICOM study that
+        inherits THIS order's identity (patient, IDs, accession, and the order's
+        pre-generated Study Instance UID), drop it into the outgoing folder for
+        the normal auto-send/hold-and-forward pipeline, and close the order as
+        fulfilled. The tech captured the study in a legacy tool and relates the
+        export to the on-screen order — no hand-typed identity."""
+        from . import ingest
+        order = self.orders.get(order_id)
+        if not order:
+            return {"ok": False, "message": "order not found"}
+        if order.get("status") != "open":
+            return {"ok": False, "message": "order is already closed"}
+        kind = ingest.detect_kind_bytes(data, filename)
+        if not kind:
+            return {"ok": False, "message": "unsupported file — capture a PDF, JPEG or PNG"}
+        base = os.path.splitext(os.path.basename(filename))[0]
+        meta = {
+            "patient": order.get("patient", ""),
+            "patient_name": order.get("patient_name", ""),
+            "patient_id": order.get("patient_id", ""),
+            "patient_birthdate": order.get("patient_birthdate", ""),
+            "patient_sex": order.get("patient_sex", ""),
+            "study_uid": order.get("study_uid", ""),
+            "study_date": order.get("scheduled_dt", ""),
+            "study_desc": order.get("study_desc", ""),
+            "accession": order.get("accession", ""),
+            "referring": order.get("referring", ""),
+            "series_desc": base or order.get("study_desc") or "Captured study",
+            "source": "RIS order " + (order.get("accession") or order_id),
+        }
+        watch = self.cfg.resolved("scu", "watch_dir")
+        try:
+            ds = ingest.build_from_bytes(data, kind, meta)
+            out = ingest.save_instance(ds, watch)
+        except Exception as exc:
+            return {"ok": False, "message": f"could not convert: {exc}"}
+        self.orders.close(order_id, reason="captured", matched_study=order.get("study_uid", ""))
+        self.log.info(
+            f"Captured study for order [acc {order.get('accession') or '—'}] "
+            f"→ {os.path.basename(out)} into outgoing; order closed",
+            kind="ris",
+        )
+        if self.watcher.running:
+            msg = "Study created and queued — Auto-send will forward it (held until the PACS is reachable)."
+        else:
+            msg = "Study created in the outgoing folder — start Auto-send to forward it."
+        return {"ok": True, "message": msg, "file": os.path.basename(out)}
 
     # ---- watcher (auto-send) ----------------------------------------------
     def start_watcher(self) -> None:
@@ -468,9 +614,11 @@ class PacsServer:
         was_receiving = bool(self.scp and self.scp.running)
         was_printing = bool(self.print_scp and self.print_scp.running)
         was_ris = bool(self.ris and self.ris.running)
+        was_mwl = bool(self.mwl_scp and self.mwl_scp.running)
         self.stop_receiver()
         self.stop_printer()
         self.stop_ris()
+        self.stop_mwl()
         self.cfg.replace(new_data)
         self.log.log_dir = self.cfg.logs_dir   # logs_dir may have changed
         # store_dir / match_on may have changed — repoint the live order store.
@@ -482,6 +630,12 @@ class PacsServer:
             self.start_printer()
         if was_ris:
             self.start_ris()
+        if was_mwl:
+            self.start_mwl()
+        self.sync_worklist()   # a no_ris destination may now want a permanent worklist
+        # Re-sync the health monitor to the new config (armed flag / trigger set).
+        self.emergency.stop()
+        self.emergency.start()
         self.log.info("Configuration updated", kind="config")
 
     # ---- status ------------------------------------------------------------
@@ -608,6 +762,8 @@ class PacsServer:
         pr = self.cfg.printer
         ris = self.ris
         rcfg = self.cfg.ris
+        mwl = self.mwl_scp
+        mcfg = self.cfg.mwl
         return {
             "receiver": {
                 "running": bool(scp and scp.running),
@@ -654,6 +810,19 @@ class PacsServer:
                 "errors": ris.error_count if ris else 0,
                 "counts": self.orders.counts(),
             },
+            "mwl": {
+                "enabled": bool(mcfg.get("enabled", False)),
+                "running": bool(mwl and mwl.running),
+                "aet": mcfg.get("aet", "CARINOMWL"),
+                "bind": mcfg.get("bind", "0.0.0.0"),
+                "port": int(mcfg.get("port", 11114)),
+                "queries": mwl.query_count if mwl else 0,
+                "matches": mwl.match_count if mwl else 0,
+                "errors": mwl.error_count if mwl else 0,
+                "tls": bool(mcfg.get("tls", False)),
+                "wanted": self.worklist_wanted(),   # permanent (enabled or a no_ris destination)
+            },
+            "emergency": self.emergency.status(),
             "destinations": self.cfg.destinations,
             "config_path": self.cfg.path,
             "logs_dir": self.cfg.logs_dir,
@@ -666,7 +835,9 @@ class PacsServer:
         }
 
     def shutdown(self) -> None:
+        self.emergency.stop()
         self.stop_watcher()
         self.stop_receiver()
         self.stop_printer()
         self.stop_ris()
+        self.stop_mwl()

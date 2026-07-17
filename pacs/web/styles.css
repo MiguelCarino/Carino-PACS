@@ -17,9 +17,13 @@
 * { box-sizing: border-box; }
 body {
   margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans);
-  min-height: 100vh; display: flex; flex-direction: column;
+  height: 100dvh; min-height: 100vh; display: flex; flex-direction: column; overflow: hidden;
 }
-.wrap { width: min(1100px, 92%); margin: 0 auto; padding: 28px 0 60px; display: flex; flex-direction: column; gap: 22px; }
+/* The dashboard fills the viewport: fixed-height header rows (cards, net-info,
+   tab strip) and a flex workspace that takes the rest and scrolls internally —
+   so the PAGE itself never scrolls. */
+.wrap { width: min(1180px, 94%); margin: 0 auto; padding: 16px 0 18px; display: flex;
+  flex-direction: column; gap: 14px; flex: 1 1 auto; min-height: 0; }
 
 /* ---- status cards ---- */
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; }
@@ -116,18 +120,42 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 .log::-webkit-scrollbar { width: 9px; }
 .log::-webkit-scrollbar-thumb { background: #1c1c1c; border-radius: 6px; }
 
-/* ── Network identity banner ────────────────────────────────────── */
+/* ── Network identity — compact, lives in the top navbar ────────── */
 .net-info {
-  font-family: var(--mono); font-size: .82rem; color: var(--muted);
-  background: linear-gradient(180deg, var(--panel), #080808);
-  border: 1px solid var(--border); border-radius: 10px;
-  padding: 12px 16px; text-align: center;
+  display: flex; align-items: center; gap: 5px; white-space: nowrap;
+  font-family: var(--mono); font-size: .72rem; color: var(--muted);
 }
 .net-info .v { color: var(--accent); font-weight: 700; }
-.net-info.offline {
-  color: var(--bad); border-color: var(--bad);
-  background: rgba(239, 68, 68, .07); font-weight: 700;
+.net-info.offline { color: var(--bad); font-weight: 700; }
+@media (max-width: 760px) { .net-info { display: none; } }
+
+/* ── Sidebar shell: left nav + right content pane ───────────────── */
+.shell { display: flex; gap: 14px; flex: 1 1 auto; min-height: 0; }
+.sidebar { flex: 0 0 190px; display: flex; flex-direction: column; gap: 8px;
+  overflow-y: auto; min-height: 0; }
+.navbtn {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  font-family: var(--sans); font-size: .92rem; font-weight: 600; color: var(--text);
+  background: linear-gradient(180deg, var(--panel), #080808);
+  border: 1px solid var(--border); border-radius: 11px; padding: 13px 15px;
+  cursor: pointer; transition: .15s;
 }
+.navbtn:hover { border-color: var(--accent); color: var(--accent); }
+.navbtn.active { border-color: var(--accent); color: var(--accent); background: var(--accent-faint); }
+.navbtn .nav-ico { width: 1.15em; text-align: center; flex-shrink: 0; }
+.navbtn .badge {
+  margin-left: auto; min-width: 20px; padding: 0 6px; text-align: center;
+  font-family: var(--mono); font-size: .68rem; font-weight: 700; line-height: 19px;
+  color: #050505; background: var(--accent); border-radius: 10px;
+}
+.navbtn .badge.warn { background: var(--warn); }
+@media (max-width: 640px) {
+  .shell { flex-direction: column; }
+  .sidebar { flex: 0 0 auto; flex-direction: row; flex-wrap: wrap; }
+  .navbtn { width: auto; flex: 1 1 auto; }
+}
+/* Services panel: let the cards grid flow and scroll normally */
+#dlgServices .modal-body { display: block; overflow-y: auto; }
 
 /* ── Low-disk warning banner ────────────────────────────────────── */
 .disk-warn {
@@ -161,11 +189,21 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 @media (max-width: 620px) { .btn.action { flex-basis: calc(50% - 8px); } }
 
 /* ── Inline workspace (the selected tab renders here) ───────────── */
+/* The workspace takes all leftover viewport height; the active inline panel
+   fills it and scrolls its own list, so the page body never scrolls. */
+#workspace { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .workpanel { overflow: hidden; }
 .workpanel[hidden] { display: none; }
+#workspace > .workpanel:not(.as-modal):not([hidden]) {
+  flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;
+}
 .workpanel .modal-head { border-bottom: 1px solid var(--border); }
-.workpanel .modal-body { max-height: min(64vh, 620px); overflow-y: auto; }
-.workpanel .modal-body .log { height: min(58vh, 560px); }
+/* inline: flex-fill + scroll the inner list, not the body */
+.workpanel:not(.as-modal) .modal-body {
+  flex: 1 1 auto; min-height: 0; max-height: none; display: flex; flex-direction: column; overflow-y: auto;
+}
+.workpanel:not(.as-modal) .modal-body .log { height: auto; flex: 1 1 auto; min-height: 0; }
+.workpanel:not(.as-modal) .modal-body .table-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; }
 .workpanel .modal-foot { border-top: 1px solid var(--border); }
 .head-right { display: flex; align-items: center; gap: 10px; }
 
@@ -232,7 +270,8 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 .hist-tab.active { background: var(--accent); color: #050505; border-color: var(--accent); font-weight: 700; }
 .hist-tools { display: flex; gap: 8px; }
 
-.hist-list { display: flex; flex-direction: column; gap: 8px; max-height: min(58vh, 520px); overflow-y: auto; padding-right: 4px; }
+.hist-list { display: flex; flex-direction: column; gap: 8px; flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-right: 4px; }
+.workpanel.as-modal .hist-list { flex: 0 1 auto; max-height: 62vh; }
 .hist-list::-webkit-scrollbar { width: 9px; }
 .hist-list::-webkit-scrollbar-thumb { background: #1c1c1c; border-radius: 6px; }
 .hist-empty { color: var(--muted); font-family: var(--mono); font-size: .82rem; text-align: center; padding: 30px 10px; }
@@ -328,6 +367,28 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 .order-acc.order-noacc { color: #f59e0b; }
 .order-patient { font-weight: 700; }
 .order-sub { color: var(--muted); font-family: var(--mono); font-size: .68rem; margin-top: 3px; }
+
+/* Emergency-failover banner + activation pop-up */
+.emg-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 11px 16px; border-radius: 8px; font-weight: 600; border: 1px solid; }
+.emg-banner[hidden] { display: none; }
+.emg-banner .emg-text { min-width: 0; }
+.emg-banner .emg-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.emg-banner.triggered { background: rgba(245,158,11,.12); border-color: #f59e0b; color: #f59e0b; }
+.emg-banner.active { background: rgba(239,68,68,.14); border-color: #ef4444; color: #f87171;
+  animation: emgpulse 2s ease-in-out infinite; }
+.emg-banner.recovering { background: rgba(34,197,94,.12); border-color: #22c55e; color: #4ade80; }
+@keyframes emgpulse { 0%,100% { border-color: #ef4444; } 50% { border-color: #7f1d1d; } }
+
+.emg-modal { position: fixed; inset: 0; z-index: 2147483000; display: flex;
+  align-items: center; justify-content: center; padding: 24px;
+  background: rgba(5,5,5,.75); backdrop-filter: blur(3px); }
+.emg-modal[hidden] { display: none; }
+.emg-modal-card { max-width: 460px; background: var(--card, #141414); border: 1px solid #ef4444;
+  border-radius: 12px; padding: 22px 24px; box-shadow: 0 20px 60px rgba(0,0,0,.6); }
+.emg-modal-card h2 { margin: 0 0 10px; color: #f87171; }
+.emg-modal-card p { margin: 0 0 12px; }
+.emg-modal-actions { display: flex; gap: 10px; margin-top: 18px; }
 
 /* Full-screen notice after the service is shut down */
 .stopped-overlay { position: fixed; inset: 0; z-index: 2147483647; display: flex;

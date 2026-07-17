@@ -58,6 +58,17 @@ DEFAULTS: dict[str, Any] = {
         "tls_key": "",
         "tls_ca": "",
     },
+    "mwl": {                    # Modality Worklist SCP — serve orders to modalities
+        "enabled": False,       # opt-in — off by default
+        "aet": "CARINOMWL",
+        "bind": "0.0.0.0",
+        "port": 11114,          # distinct from scp (11112) and print (11113)
+        "allowed_aets": [],
+        "tls": False,
+        "tls_cert": "",
+        "tls_key": "",
+        "tls_ca": "",
+    },
     "ris": {                    # emergency RIS: HL7/MLLP order intake + manual entry
         "enabled": False,       # opt-in — off by default
         "bind": "0.0.0.0",
@@ -66,6 +77,14 @@ DEFAULTS: dict[str, Any] = {
         "match_on": "accession",  # accession | accession_or_patient (Patient-ID fallback)
         "auto_close": True,     # close+archive a matched order automatically on study receipt
         "allowed_hosts": [],    # source IPs allowed to send HL7 (blank = any)
+    },
+    "emergency": {              # failover: watch primary destination(s), prompt to activate
+        "armed": False,         # is the health monitor running / failover armed?
+        "probe_interval_sec": 30,   # how often to C-ECHO each emergency_trigger destination
+        "offline_threshold_sec": 120,  # continuous-failure duration before triggering
+        "recovery_successes": 2,    # consecutive good probes to declare a primary back
+        "auto_activate": False,     # False = pop up + ask; True = start emergency services automatically
+        "hold_and_forward": True,   # while active, auto-queue received studies for the primary
     },
     "destinations": [],
     "web": {
@@ -143,8 +162,16 @@ class Config:
         return self.data["print"]
 
     @property
+    def mwl(self) -> dict:
+        return self.data["mwl"]
+
+    @property
     def ris(self) -> dict:
         return self.data["ris"]
+
+    @property
+    def emergency(self) -> dict:
+        return self.data["emergency"]
 
     @property
     def destinations(self) -> list[dict]:
@@ -214,6 +241,20 @@ def validate(data: dict) -> None:
         if pr.get("tls") and (not str(pr.get("tls_cert", "")).strip() or not str(pr.get("tls_key", "")).strip()):
             raise ValueError("print.tls is on but tls_cert / tls_key are not set")
 
+    mwl = data.get("mwl")
+    if mwl is not None:
+        if not isinstance(mwl, dict):
+            raise ValueError("'mwl' must be an object")
+        mp = mwl.get("port", 11114)
+        if not (isinstance(mp, int) and 1 <= mp <= 65535):
+            raise ValueError("mwl.port must be 1..65535")
+        if mwl.get("enabled") and mp in (data["scp"]["port"], data.get("print", {}).get("port")):
+            raise ValueError("mwl.port must differ from the scp / print ports")
+        if len(str(mwl.get("aet", ""))) > 16:
+            raise ValueError("mwl.aet must be 16 characters or fewer")
+        if mwl.get("tls") and (not str(mwl.get("tls_cert", "")).strip() or not str(mwl.get("tls_key", "")).strip()):
+            raise ValueError("mwl.tls is on but tls_cert / tls_key are not set")
+
     ris = data.get("ris")
     if ris is not None:
         if not isinstance(ris, dict):
@@ -227,6 +268,18 @@ def validate(data: dict) -> None:
             raise ValueError("ris.match_on must be 'accession' or 'accession_or_patient'")
         if not isinstance(ris.get("allowed_hosts", []), list):
             raise ValueError("ris.allowed_hosts must be a list")
+
+    em = data.get("emergency")
+    if em is not None:
+        if not isinstance(em, dict):
+            raise ValueError("'emergency' must be an object")
+        for k in ("probe_interval_sec", "recovery_successes"):
+            v = em.get(k)
+            if v is not None and not (isinstance(v, (int, float)) and v >= 1):
+                raise ValueError(f"emergency.{k} must be a number >= 1")
+        ot = em.get("offline_threshold_sec")
+        if ot is not None and not (isinstance(ot, (int, float)) and ot >= 0):
+            raise ValueError("emergency.offline_threshold_sec must be a number >= 0")
 
     dests = data.get("destinations", [])
     if not isinstance(dests, list):
