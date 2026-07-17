@@ -16,14 +16,14 @@
   // Full loaded config sections — kept so a Save preserves any key that has no
   // form input (min_free_gb, pending_dir, …); apply_config merges over DEFAULTS,
   // so an omitted key would otherwise silently reset.
-  let loadedScp = {}, loadedScu = {}, loadedPrint = {};
+  let loadedScp = {}, loadedScu = {}, loadedPrint = {}, loadedRis = {};
   let loadedWeb = { host: "127.0.0.1", port: 8042 };
   let statusTimer = null, logTimer = null;
   let editorUrl = "";                                // DICOM-editor base URL (from status); "" hides ✎ Edit
 
   /* ── Status polling ──────────────────────────────────────────── */
   function renderStatus(s) {
-    const rx = s.receiver, wx = s.watcher, px = s.printer || {};
+    const rx = s.receiver, wx = s.watcher, px = s.printer || {}, rs = s.ris || {};
 
     // This machine's network identity (what remote nodes send to).
     const ni = $("netInfo");
@@ -63,6 +63,14 @@
       const n = s.stuck || 0;
       sBadge.textContent = String(n);
       sBadge.hidden = n === 0;
+    }
+
+    // Open-orders badge on the 📋 button.
+    const oBadge = $("ordersBadge");
+    if (oBadge) {
+      const n = (rs.counts && rs.counts.open) || 0;
+      oBadge.textContent = String(n);
+      oBadge.hidden = n === 0;
     }
 
     // Low-disk warning banner (only when the storage volume is below the floor).
@@ -105,6 +113,14 @@
     $("pxErr").textContent = px.errors || 0;
     $("pxTls").textContent = px.tls ? "TLS" : "plaintext";
     setToggle($("pxToggle"), px.running);
+
+    setDot($("rsDot"), rs.running);
+    $("rsAddr").textContent = `${rs.bind || "0.0.0.0"}:${rs.port || "—"}`;
+    $("rsMatch").textContent = rs.match_on === "accession_or_patient" ? "accession / patient ID" : "accession";
+    $("rsOpen").textContent = (rs.counts && rs.counts.open) || 0;
+    $("rsRecv").textContent = rs.received || 0;
+    $("rsErr").textContent = rs.errors || 0;
+    setToggle($("rsToggle"), rs.running);
   }
   function setToggle(btn, on) {
     btn.dataset.on = String(on);
@@ -132,12 +148,13 @@
       const data = await api("/api/log?since=" + logSeq);
       const box = $("log");
       const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 20;
-      let sawStore = false, sawSend = false, sawPrint = false;
+      let sawStore = false, sawSend = false, sawPrint = false, sawRis = false;
       for (const e of data.entries) {
         logSeq = e.seq;
         if (e.kind === "store") sawStore = true;   // a file was received
         if (e.kind === "send") sawSend = true;      // a file was forwarded
         if (e.kind === "print") sawPrint = true;    // a print job / event
+        if (e.kind === "ris") sawRis = true;        // an HL7 order / match event
         const line = document.createElement("div");
         line.className = "line";
         const t = document.createElement("span");
@@ -155,6 +172,7 @@
         if (sawStore) blink($("rxDot"));
         if (sawSend) blink($("wxDot"));
         if (sawPrint) blink($("pxDot"));
+        if (sawRis) blink($("rsDot"));
       }
       firstLog = false;
     } catch (e) { /* ignore */ }
@@ -166,6 +184,7 @@
     loadedScp = c.scp || {};
     loadedScu = c.scu || {};
     loadedPrint = c.print || {};
+    loadedRis = c.ris || {};
     loadedWeb = c.web || loadedWeb;
     $("webEditorUrl").value = (c.web && c.web.editor_url) || "";
     $("scpAet").value = c.scp.aet;
@@ -200,6 +219,14 @@
     $("prnTlsCert").value = pr.tls_cert || "";
     $("prnTlsKey").value = pr.tls_key || "";
     $("prnTlsCa").value = pr.tls_ca || "";
+    const ri = c.ris || {};
+    $("risEnabled").checked = !!ri.enabled;
+    $("risBind").value = ri.bind || "0.0.0.0";
+    $("risPort").value = ri.port != null ? ri.port : 2575;
+    $("risDir").value = ri.store_dir || "./ris";
+    $("risMatch").value = ri.match_on === "accession_or_patient" ? "accession_or_patient" : "accession";
+    $("risAutoClose").checked = ri.auto_close !== false;
+    $("risHosts").value = (ri.allowed_hosts || []).join(", ");
     renderDests(c.destinations || []);
     reflowActive();
   }
@@ -280,6 +307,16 @@
         tls_cert: $("prnTlsCert").value.trim(),
         tls_key: $("prnTlsKey").value.trim(),
         tls_ca: $("prnTlsCa").value.trim(),
+      },
+      ris: {
+        ...loadedRis,
+        enabled: $("risEnabled").checked,
+        bind: $("risBind").value.trim() || "0.0.0.0",
+        port: parseInt($("risPort").value, 10),
+        store_dir: $("risDir").value.trim() || "./ris",
+        match_on: $("risMatch").value,
+        auto_close: $("risAutoClose").checked,
+        allowed_hosts: $("risHosts").value.split(",").map((s) => s.trim()).filter(Boolean),
       },
       destinations: collectDests(),
       web: { ...loadedWeb, editor_url: $("webEditorUrl").value.trim() },
@@ -681,15 +718,124 @@
     } catch (e) { flashNote(e.message, false); }
   }
 
+  /* ── RIS orders (emergency RIS: intake + reconciliation) ─────── */
+  let orderStatus = "open";
+
+  async function loadOrders() {
+    const list = $("ordersList");
+    list.innerHTML = "<div class='hist-empty'>Loading…</div>";
+    try {
+      const data = await api("/api/ris/orders?status=" + orderStatus);
+      renderOrders(data.orders || []);
+      $("ordPurge").hidden = orderStatus !== "closed" || !(data.counts && data.counts.closed);
+      reflowActive();
+    } catch (e) {
+      list.innerHTML = "<div class='hist-empty'>Could not load: " + e.message + "</div>";
+    }
+  }
+
+  function renderOrders(orders) {
+    const list = $("ordersList");
+    list.innerHTML = "";
+    if (!orders.length) {
+      list.innerHTML = "<div class='hist-empty'>" +
+        (orderStatus === "open" ? "No open orders. Send an ORM over HL7/MLLP or add one above."
+                                : "No closed orders yet.") + "</div>";
+      return;
+    }
+    orders.forEach((o) => {
+      const row = $("orderRowTpl").content.cloneNode(true).querySelector(".order-row");
+      const acc = row.querySelector(".order-acc");
+      acc.textContent = o.accession ? ("ACC " + o.accession) : "no accession";
+      if (!o.accession) acc.classList.add("order-noacc");
+      row.querySelector(".order-patient").textContent = o.patient || o.patient_name || "(no patient)";
+      row.querySelector(".hist-meta").textContent = [
+        o.patient_id ? "ID " + o.patient_id : "",
+        o.modality || "",
+        o.study_desc || "(no study description)",
+        o.scheduled_dt ? "@ " + o.scheduled_dt : "",
+      ].filter(Boolean).join("  ·  ");
+      const sub = row.querySelector(".order-sub");
+      const bits = ["via " + (o.source || "?"), "queued " + fmtStamp(o.created)];
+      if (o.status === "closed") {
+        bits.push((o.close_reason === "matched" ? "✓ matched" : "cancelled") + " " + fmtStamp(o.closed));
+      }
+      if (o.referring) bits.push("ref: " + o.referring);
+      sub.textContent = bits.join("  ·  ");
+      const cancelBtn = row.querySelector(".order-cancel");
+      if (o.status === "closed") cancelBtn.hidden = true;
+      else cancelBtn.addEventListener("click", () => orderAction("cancel", o, "Cancel this order? It moves to Closed (kept for the audit trail)."));
+      row.querySelector(".order-del").addEventListener("click", () =>
+        orderAction("delete", o, "Delete this order permanently? This removes it from the audit trail."));
+      list.appendChild(row);
+    });
+  }
+
+  function fmtStamp(iso) {
+    if (!iso) return "";
+    return String(iso).replace("T", " ").replace("Z", "");
+  }
+
+  async function addOrder(btn) {
+    const fields = {
+      accession: $("ordAcc").value.trim(),
+      patient: $("ordPatient").value.trim(),
+      patient_id: $("ordPid").value.trim(),
+      modality: $("ordMod").value.trim(),
+      study_desc: $("ordDesc").value.trim(),
+      scheduled_dt: $("ordWhen").value.trim(),
+      referring: $("ordRef").value.trim(),
+    };
+    if (!fields.accession && !fields.patient && !fields.patient_id) {
+      flashNote("An order needs at least an accession, patient name or ID", false);
+      return;
+    }
+    const old = btn.textContent; btn.disabled = true; btn.textContent = "…";
+    try {
+      const r = await post("/api/ris/orders", fields);
+      flashNote(r.message || "Order queued", r.ok !== false);
+      if (r.ok !== false) {
+        ["ordAcc", "ordPatient", "ordPid", "ordMod", "ordDesc", "ordWhen", "ordRef"].forEach((id) => { $(id).value = ""; });
+        orderStatus = "open";
+        document.querySelectorAll("#dlgOrders .hist-tab").forEach((t) => t.classList.toggle("active", t.dataset.ostatus === "open"));
+        loadOrders();
+        pollStatus();
+      }
+    } catch (e) {
+      flashNote(e.message, false);
+    } finally { btn.disabled = false; btn.textContent = old; }
+  }
+
+  async function orderAction(action, o, confirmMsg) {
+    if (confirmMsg && !confirm(confirmMsg + "\n\n" + (o.patient || "(no patient)") +
+        (o.accession ? "  ·  ACC " + o.accession : ""))) return;
+    try {
+      const r = await post("/api/ris/orders/" + action, { id: o.id });
+      flashNote(r.message || "Done", r.ok !== false);
+      loadOrders();
+      pollStatus();
+    } catch (e) { flashNote(e.message, false); }
+  }
+
+  async function purgeClosedOrders() {
+    if (!confirm("Delete ALL closed orders?\n\nThis permanently clears the closed-order audit trail.")) return;
+    try {
+      const r = await post("/api/ris/orders/purge", {});
+      flashNote(r.message || "Purged", r.ok !== false);
+      loadOrders();
+      pollStatus();
+    } catch (e) { flashNote(e.message, false); }
+  }
+
   /* ── Workspace panels: inline tabs that pop out only on overflow ──
      Settings is ALWAYS a popup. History / Destinations / Logs / Pending /
      Stuck render inline in the workspace, and auto-promote to a centered
      popup only when their content is too tall to fit the viewport. Closing
      the popup (✕ / backdrop / Esc) keeps that panel inline (scrolling) for
      the rest of this activation. */
-  const INLINE_PANELS = ["dlgHistory", "dlgPending", "dlgStuck", "dlgDests", "dlgLogs"];
+  const INLINE_PANELS = ["dlgHistory", "dlgOrders", "dlgPending", "dlgStuck", "dlgDests", "dlgLogs"];
   const SETTINGS_PANEL = "dlgSettings";
-  const loaders = { dlgHistory: loadHistory, dlgPending: loadPending, dlgStuck: loadStuck };
+  const loaders = { dlgHistory: loadHistory, dlgOrders: loadOrders, dlgPending: loadPending, dlgStuck: loadStuck };
   let activeInline = "dlgHistory";
   let overlayId = null;
   const dismissed = new Set();
@@ -755,6 +901,12 @@
       if (e.target.dataset.on !== "true") $("prnEnabled").checked = true;
       toggle("printer", e.target);
     });
+    $("rsToggle").addEventListener("click", (e) => {
+      // Starting from the card also flips the "start on launch" flag (toggle()
+      // persists the config before starting, like the printer card).
+      if (e.target.dataset.on !== "true") $("risEnabled").checked = true;
+      toggle("ris", e.target);
+    });
     $("addDest").addEventListener("click", () => addDestRow({ enabled: true }));
     $("saveCfg").addEventListener("click", () => saveConfig().then((ok) => { if (ok) closeOverlay(); }));
     $("saveDests").addEventListener("click", () => saveConfig());
@@ -783,6 +935,17 @@
       }));
     $("histRefresh").addEventListener("click", loadHistory);
     $("histDeleteAll").addEventListener("click", histDeleteAll);
+    // RIS orders: Open/Closed sub-tabs + form + actions.
+    document.querySelectorAll("#dlgOrders .hist-tab").forEach((tab) =>
+      tab.addEventListener("click", () => {
+        document.querySelectorAll("#dlgOrders .hist-tab").forEach((t) => t.classList.remove("active"));
+        tab.classList.add("active");
+        orderStatus = tab.dataset.ostatus;
+        loadOrders();
+      }));
+    $("ordAdd").addEventListener("click", () => addOrder($("ordAdd")));
+    $("ordRefresh").addEventListener("click", loadOrders);
+    $("ordPurge").addEventListener("click", purgeClosedOrders);
     $("pendRefresh").addEventListener("click", loadPending);
     $("stuckRefresh").addEventListener("click", loadStuck);
     $("stuckRetryAll").addEventListener("click", () => retryStuck(null, $("stuckRetryAll")));

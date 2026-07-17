@@ -8,7 +8,20 @@ A small, cross-platform **DICOM store-only PACS**. It does two things:
 - **Receive** — a Storage SCP that accepts `C-STORE` (and `C-ECHO`) and files incoming studies to disk, optionally organized by Patient / Study / Series.
 - **Auto-send** — watches a folder and automatically forwards every new `.dcm` to **N** remote DICOM nodes via `C-STORE`, retrying each host until it accepts.
 
-Everything is driven by one `config.json` and can be run head-less from the CLI or through a local web dashboard (Carino-workshop styled). No query/retrieve, no worklist — just store and forward.
+It also includes two capture-and-reconcile helpers for departments running degraded: a **virtual print receiver** (grab print-only modalities as PDF) and an **emergency RIS** (receive HL7 orders and match them back to the studies that arrive).
+
+Everything is driven by one `config.json` and can be run head-less from the CLI or through a local web dashboard (Carino-workshop styled). No query/retrieve — just store, forward, and reconcile.
+
+### Emergency RIS (HL7 order intake + reconciliation)
+
+For **testing** a RIS→PACS feed without a live RIS, and as an **emergency fallback** when the real RIS (or its worklist to the modality) is down:
+
+- **Receives** HL7 `ORM^O01` orders over **MLLP** (default port `2575`) — point a RIS or an HL7 test sender at it — *and* lets you **hand-key** orders into the dashboard when nothing upstream is alive.
+- Open orders show in the **📋 Orders** tab with the **Accession #** the technician types into the modality by hand.
+- When the study is C-STORE'd back, it's **matched** to its order by Accession Number (Patient ID optional fallback); the order is **closed and archived** for the audit trail — never erased.
+- **Image delivery is never gated on a match** — a study with no matching order is still stored/forwarded; the order simply stays open for manual reconciliation.
+
+Start it from the **Emergency RIS** card, the Settings → *Emergency RIS* fieldset (start-on-launch), or head-less with `pacs ris`.
 
 Built on [`pynetdicom`](https://github.com/pydicom/pynetdicom) + [`pydicom`](https://github.com/pydicom/pydicom), so it runs identically on **Windows, macOS, and Linux (Debian & Fedora)**.
 
@@ -113,12 +126,14 @@ via MDM / Group Policy and trust it centrally (no public cert needed), or use
 The dashboard is optional — every function has a head-less command:
 
 ```bash
-./run.sh serve [--receive] [--watch] [--host H] [--port P]
+./run.sh serve [--receive] [--watch] [--print] [--ris] [--host H] [--port P]
                      # web dashboard; flags also auto-start the workers
 ./run.sh receive [--port 11112] [--aet CARINOPACS] [--out ./received]
                      # Storage SCP only, runs until Ctrl+C
 ./run.sh send [--watch-dir ./outgoing]
                      # folder watcher / auto-forward only, runs until Ctrl+C
+./run.sh ris [--port 2575]
+                     # emergency-RIS HL7/MLLP order listener only, runs until Ctrl+C
 ./run.sh echo --name "Example PACS"
 ./run.sh echo --host 10.0.0.5 --port 104 --aet REMOTEPACS
                      # connectivity test

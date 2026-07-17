@@ -14,6 +14,7 @@ from typing import Optional
 from .config import Config
 from .logbuf import LogBuffer
 from .print_scp import PrintSCP
+from .ris import OrderStore, RisListener
 from .scp import StorageSCP
 from .scu import Destination, SendResult, c_echo
 from .watcher import FolderWatcher
@@ -26,6 +27,14 @@ class PacsServer:
         self._lock = threading.Lock()
         self.scp: Optional[StorageSCP] = None
         self.print_scp: Optional[PrintSCP] = None
+        self.ris: Optional[RisListener] = None
+        # The order store is always live (manual entry works even with the HL7
+        # listener stopped); the listener is an optional front door onto it.
+        self.orders = OrderStore(
+            store_dir=cfg.resolved("ris", "store_dir"),
+            log=self.log,
+            match_on=cfg.ris.get("match_on", "accession"),
+        )
         self.watcher = FolderWatcher(cfg, self.log)
 
     # ---- receiver (Storage SCP) -------------------------------------------
@@ -41,6 +50,7 @@ class PacsServer:
                 storage_dir=self.cfg.resolved("scp", "storage_dir"),
                 organize=bool(s.get("organize", True)),
                 log=self.log,
+                on_received=self._reconcile_study,
                 allowed_aets=s.get("allowed_aets", []),
                 tls=bool(s.get("tls", False)),
                 tls_cert=self.cfg.resolve_path(s.get("tls_cert", "")),
@@ -109,6 +119,88 @@ class PacsServer:
         with self._lock:
             if self.print_scp:
                 self.print_scp.stop()
+
+    # ---- emergency RIS (HL7/MLLP order intake + reconciliation) -----------
+    def start_ris(self) -> None:
+        with self._lock:
+            if self.ris and self.ris.running:
+                return
+            r = self.cfg.ris
+            # match_on may have changed in config since the store was built.
+            self.orders.match_on = r.get("match_on", "accession")
+            self.ris = RisListener(
+                bind=r.get("bind", "0.0.0.0"),
+                port=int(r.get("port", 2575)),
+                store=self.orders,
+                log=self.log,
+                allowed_hosts=r.get("allowed_hosts", []),
+            )
+            self.ris.start()
+
+    def stop_ris(self) -> None:
+        with self._lock:
+            if self.ris:
+                self.ris.stop()
+
+    def _reconcile_study(self, ds, path: str) -> None:
+        """Called for every C-STORE'd instance: try to match it to an open RIS
+        order by Accession Number (or Patient ID fallback). On a hit, close +
+        archive the order. Delivery of the study is NEVER gated on this — the
+        instance is already stored; this only reconciles order tracking."""
+        accession = str(getattr(ds, "AccessionNumber", "") or "")
+        patient_id = str(getattr(ds, "PatientID", "") or "")
+        if not accession and not patient_id:
+            return
+        order = self.orders.match(accession, patient_id)
+        if not order:
+            return
+        study_uid = str(getattr(ds, "StudyInstanceUID", "") or "")
+        if self.cfg.ris.get("auto_close", True):
+            self.orders.close(order["id"], reason="matched", matched_study=study_uid)
+            self.log.info(
+                f"RIS order matched + closed: {order.get('patient') or '?'} "
+                f"[acc {order.get('accession') or '—'}] ← study {os.path.basename(path)}",
+                kind="ris",
+            )
+        else:
+            self.log.info(
+                f"RIS order matched (left open — auto-close off): "
+                f"{order.get('patient') or '?'} [acc {order.get('accession') or '—'}]",
+                kind="ris",
+            )
+
+    # ---- RIS orders (CRUD over the store) ---------------------------------
+    def list_orders(self, status: Optional[str] = None) -> dict:
+        return {"orders": self.orders.list(status), "counts": self.orders.counts()}
+
+    def add_order(self, fields: dict) -> dict:
+        if not any(str(fields.get(k, "")).strip() for k in ("accession", "patient", "patient_id")):
+            return {"ok": False, "message": "an order needs at least an accession, patient name or patient ID"}
+        order = self.orders.add(fields, source="manual")
+        return {"ok": True, "message": "Order queued", "order": order}
+
+    def update_order(self, oid: str, fields: dict) -> dict:
+        o = self.orders.update(oid, fields)
+        if not o:
+            return {"ok": False, "message": "order not found"}
+        self.log.info(f"RIS order edited [acc {o.get('accession') or '—'}]", kind="ris")
+        return {"ok": True, "message": "Order updated", "order": o}
+
+    def close_order(self, oid: str) -> dict:
+        o = self.orders.close(oid, reason="cancelled")
+        if not o:
+            return {"ok": False, "message": "order not found"}
+        self.log.info(f"RIS order cancelled [acc {o.get('accession') or '—'}]", kind="ris")
+        return {"ok": True, "message": "Order cancelled"}
+
+    def delete_order(self, oid: str) -> dict:
+        ok = self.orders.delete(oid)
+        return {"ok": ok, "message": "Order deleted" if ok else "order not found"}
+
+    def purge_closed_orders(self) -> dict:
+        n = self.orders.purge_closed()
+        self.log.info(f"Purged {n} closed RIS order(s)", kind="ris")
+        return {"ok": True, "removed": n, "message": f"Removed {n} closed order(s)"}
 
     # ---- watcher (auto-send) ----------------------------------------------
     def start_watcher(self) -> None:
@@ -375,14 +467,21 @@ class PacsServer:
         self.cfg.would_accept(new_data)
         was_receiving = bool(self.scp and self.scp.running)
         was_printing = bool(self.print_scp and self.print_scp.running)
+        was_ris = bool(self.ris and self.ris.running)
         self.stop_receiver()
         self.stop_printer()
+        self.stop_ris()
         self.cfg.replace(new_data)
         self.log.log_dir = self.cfg.logs_dir   # logs_dir may have changed
+        # store_dir / match_on may have changed — repoint the live order store.
+        self.orders.store_dir = self.cfg.resolved("ris", "store_dir")
+        self.orders.match_on = self.cfg.ris.get("match_on", "accession")
         if was_receiving:
             self.start_receiver()
         if was_printing:
             self.start_printer()
+        if was_ris:
+            self.start_ris()
         self.log.info("Configuration updated", kind="config")
 
     # ---- status ------------------------------------------------------------
@@ -507,6 +606,8 @@ class PacsServer:
         scp = self.scp
         pscp = self.print_scp
         pr = self.cfg.printer
+        ris = self.ris
+        rcfg = self.cfg.ris
         return {
             "receiver": {
                 "running": bool(scp and scp.running),
@@ -541,6 +642,18 @@ class PacsServer:
                 "poll_interval": self.cfg.scu.get("poll_interval", 3),
                 "tls_verify": bool(self.cfg.scu.get("tls_verify", True)),
             },
+            "ris": {
+                "enabled": bool(rcfg.get("enabled", False)),
+                "running": bool(ris and ris.running),
+                "bind": rcfg.get("bind", "0.0.0.0"),
+                "port": int(rcfg.get("port", 2575)),
+                "match_on": rcfg.get("match_on", "accession"),
+                "auto_close": bool(rcfg.get("auto_close", True)),
+                "received": ris.received_count if ris else 0,
+                "orders_in": ris.order_count if ris else 0,
+                "errors": ris.error_count if ris else 0,
+                "counts": self.orders.counts(),
+            },
             "destinations": self.cfg.destinations,
             "config_path": self.cfg.path,
             "logs_dir": self.cfg.logs_dir,
@@ -556,3 +669,4 @@ class PacsServer:
         self.stop_watcher()
         self.stop_receiver()
         self.stop_printer()
+        self.stop_ris()

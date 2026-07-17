@@ -4,6 +4,7 @@
     python -m pacs receive    # Storage SCP only, headless
     python -m pacs send       # folder watcher / auto-forward only, headless
     python -m pacs print      # virtual DICOM print receiver only, headless
+    python -m pacs ris        # emergency-RIS HL7/MLLP order listener, headless
     python -m pacs echo ...    # C-ECHO connectivity test
     python -m pacs init       # scaffold config.json + folders
 """
@@ -96,6 +97,12 @@ def cmd_serve(args) -> int:
         except Exception as exc:
             server.log.error(f"Could not start print receiver: {exc}", kind="print")
             print(f"WARNING: print receiver did not start: {exc}", file=sys.stderr)
+    if args.ris or cfg.ris.get("enabled"):
+        try:
+            server.start_ris()
+        except Exception as exc:
+            server.log.error(f"Could not start RIS listener: {exc}", kind="ris")
+            print(f"WARNING: RIS listener did not start: {exc}", file=sys.stderr)
 
     host = args.host or cfg.web.get("host", "127.0.0.1")
     port = args.port or int(cfg.web.get("port", 8042))
@@ -149,6 +156,16 @@ def cmd_print(args) -> int:
     return 0
 
 
+def cmd_ris(args) -> int:
+    cfg = Config(args.config)
+    if args.port:
+        cfg.ris["port"] = args.port
+    server = PacsServer(cfg)
+    server.start_ris()
+    _block_until_signal(server)
+    return 0
+
+
 def cmd_echo(args) -> int:
     cfg = Config(args.config)
     if args.name:
@@ -193,6 +210,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--watch", action="store_true", help="also start the folder watcher on launch")
     s.add_argument("--print", action="store_true", dest="print",
                    help="also start the virtual DICOM print receiver on launch")
+    s.add_argument("--ris", action="store_true", dest="ris",
+                   help="also start the emergency-RIS HL7/MLLP listener on launch")
     s.set_defaults(func=cmd_serve)
 
     r = sub.add_parser("receive", help="run the Storage SCP (receiver) headless")
@@ -209,6 +228,10 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--port", type=int, help="listen port")
     pr.add_argument("--aet", help="local (printer) AE title")
     pr.set_defaults(func=cmd_print)
+
+    rs = sub.add_parser("ris", help="run the emergency-RIS HL7/MLLP order listener headless")
+    rs.add_argument("--port", type=int, help="listen port (default 2575)")
+    rs.set_defaults(func=cmd_ris)
 
     e = sub.add_parser("echo", help="C-ECHO connectivity test")
     e.add_argument("--name", help="destination name from config")

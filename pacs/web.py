@@ -98,6 +98,61 @@ def create_app(server: PacsServer) -> Flask:
             return jsonify(error=f"could not start print receiver: {exc}"), 400
         return jsonify(ok=True, printer=server.status()["printer"])
 
+    @app.post("/api/ris")
+    def api_ris():
+        action = (request.get_json(silent=True) or {}).get("action")
+        try:
+            if action == "start":
+                server.start_ris()
+            elif action == "stop":
+                server.stop_ris()
+            else:
+                return jsonify(error="action must be start|stop"), 400
+        except OSError as exc:
+            return jsonify(error=f"could not start RIS listener: {exc}"), 400
+        return jsonify(ok=True, ris=server.status()["ris"])
+
+    # ---- RIS orders (emergency RIS: intake + reconciliation) --------------
+    @app.get("/api/ris/orders")
+    def api_ris_orders():
+        status = request.args.get("status") or None
+        return jsonify(server.list_orders(status))
+
+    @app.post("/api/ris/orders")
+    def api_ris_add_order():
+        d = request.get_json(silent=True) or {}
+        res = server.add_order(d)
+        return jsonify(res), (200 if res.get("ok") else 400)
+
+    @app.post("/api/ris/orders/update")
+    def api_ris_update_order():
+        d = request.get_json(silent=True) or {}
+        oid = d.get("id")
+        if not oid:
+            return jsonify(ok=False, message="missing 'id'"), 400
+        res = server.update_order(oid, d)
+        return jsonify(res), (200 if res.get("ok") else 400)
+
+    @app.post("/api/ris/orders/cancel")
+    def api_ris_cancel_order():
+        oid = (request.get_json(silent=True) or {}).get("id")
+        if not oid:
+            return jsonify(ok=False, message="missing 'id'"), 400
+        res = server.close_order(oid)
+        return jsonify(res), (200 if res.get("ok") else 400)
+
+    @app.post("/api/ris/orders/delete")
+    def api_ris_delete_order():
+        oid = (request.get_json(silent=True) or {}).get("id")
+        if not oid:
+            return jsonify(ok=False, message="missing 'id'"), 400
+        res = server.delete_order(oid)
+        return jsonify(res), (200 if res.get("ok") else 400)
+
+    @app.post("/api/ris/orders/purge")
+    def api_ris_purge_orders():
+        return jsonify(server.purge_closed_orders())
+
     @app.post("/api/watcher")
     def api_watcher():
         action = (request.get_json(silent=True) or {}).get("action")

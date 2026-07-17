@@ -309,6 +309,26 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 .pend-actions { display: flex; gap: 6px; flex-shrink: 0; }
 @media (max-width: 620px) { .pend-fields { grid-template-columns: 1fr; } }
 
+/* RIS orders: new-order form + order rows */
+.order-new { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 14px; background: #0a0a0a; }
+.order-new > summary { cursor: pointer; padding: 10px 14px; font-family: var(--mono); font-size: .72rem;
+  text-transform: uppercase; letter-spacing: .05em; color: var(--accent); user-select: none; }
+.order-new[open] > summary { border-bottom: 1px solid var(--border); }
+.order-form { display: grid; grid-template-columns: 1fr 1fr; gap: 9px 12px; padding: 14px; }
+.order-form label { display: flex; flex-direction: column; gap: 3px;
+  font-family: var(--mono); font-size: .62rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.order-form label.wide { grid-column: 1 / -1; }
+.order-form input { background: #0f0f0f; border: 1px solid var(--border); border-radius: 6px;
+  padding: 7px 9px; color: var(--text); font-size: .82rem; font-family: inherit; }
+.order-form input:focus { outline: none; border-color: var(--accent); }
+.order-form-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 14px 14px; }
+.order-form-foot .hint { margin: 0; max-width: 52ch; }
+@media (max-width: 620px) { .order-form { grid-template-columns: 1fr; } }
+.order-acc { font-family: var(--mono); font-size: .78rem; color: var(--accent); }
+.order-acc.order-noacc { color: #f59e0b; }
+.order-patient { font-weight: 700; }
+.order-sub { color: var(--muted); font-family: var(--mono); font-size: .68rem; margin-top: 3px; }
+
 /* Full-screen notice after the service is shut down */
 .stopped-overlay { position: fixed; inset: 0; z-index: 2147483647; display: flex;
   align-items: center; justify-content: center; text-align: center;

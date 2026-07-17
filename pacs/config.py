@@ -58,6 +58,15 @@ DEFAULTS: dict[str, Any] = {
         "tls_key": "",
         "tls_ca": "",
     },
+    "ris": {                    # emergency RIS: HL7/MLLP order intake + manual entry
+        "enabled": False,       # opt-in — off by default
+        "bind": "0.0.0.0",
+        "port": 2575,           # IANA-registered HL7/MLLP port (distinct from the DICOM ports)
+        "store_dir": "./ris",   # orders.json lives here
+        "match_on": "accession",  # accession | accession_or_patient (Patient-ID fallback)
+        "auto_close": True,     # close+archive a matched order automatically on study receipt
+        "allowed_hosts": [],    # source IPs allowed to send HL7 (blank = any)
+    },
     "destinations": [],
     "web": {
         "host": "127.0.0.1",
@@ -67,7 +76,8 @@ DEFAULTS: dict[str, Any] = {
     "logs_dir": "./logs",       # dated log files (one per day) live here
 }
 
-_PATH_FIELDS = [("scp", "storage_dir"), ("scu", "watch_dir"), ("scu", "sent_dir"), ("scu", "pending_dir")]
+_PATH_FIELDS = [("scp", "storage_dir"), ("scu", "watch_dir"), ("scu", "sent_dir"),
+                ("scu", "pending_dir"), ("ris", "store_dir")]
 
 
 def _deep_merge(base: dict, over: dict) -> dict:
@@ -131,6 +141,10 @@ class Config:
     @property
     def printer(self) -> dict:
         return self.data["print"]
+
+    @property
+    def ris(self) -> dict:
+        return self.data["ris"]
 
     @property
     def destinations(self) -> list[dict]:
@@ -199,6 +213,20 @@ def validate(data: dict) -> None:
             raise ValueError("print.layout must be 'pdf' or 'image'")
         if pr.get("tls") and (not str(pr.get("tls_cert", "")).strip() or not str(pr.get("tls_key", "")).strip()):
             raise ValueError("print.tls is on but tls_cert / tls_key are not set")
+
+    ris = data.get("ris")
+    if ris is not None:
+        if not isinstance(ris, dict):
+            raise ValueError("'ris' must be an object")
+        rp = ris.get("port", 2575)
+        if not (isinstance(rp, int) and 1 <= rp <= 65535):
+            raise ValueError("ris.port must be 1..65535")
+        if ris.get("enabled") and rp in (data["scp"]["port"], data.get("print", {}).get("port")):
+            raise ValueError("ris.port must differ from the DICOM (scp/print) ports")
+        if ris.get("match_on", "accession") not in ("accession", "accession_or_patient"):
+            raise ValueError("ris.match_on must be 'accession' or 'accession_or_patient'")
+        if not isinstance(ris.get("allowed_hosts", []), list):
+            raise ValueError("ris.allowed_hosts must be a list")
 
     dests = data.get("destinations", [])
     if not isinstance(dests, list):
