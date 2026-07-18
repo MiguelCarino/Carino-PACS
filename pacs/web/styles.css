@@ -129,6 +129,58 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 .net-info.offline { color: var(--bad); font-weight: 700; }
 @media (max-width: 760px) { .net-info { display: none; } }
 
+/* ── Service chips in the top navbar ─────────────────────────────
+   One chip per service, mirrored from the Services cards. Running → gold;
+   stopped → black-and-white. Clicking a chip toggles the service (it re-fires
+   the card's Start/Stop button), so navbar and cards stay in lock-step. */
+.svc-nav {
+  display: flex; align-items: center; gap: 6px;
+  padding-right: 12px; margin-right: 2px; border-right: 1px solid var(--border);
+}
+.svc-chip {
+  position: relative;   /* anchors the ::after transmit pulse ring */
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  font-family: var(--mono); font-size: .6rem; font-weight: 700;
+  letter-spacing: .06em; text-transform: uppercase; line-height: 1;
+  padding: 5px 9px; border-radius: 999px; -webkit-appearance: none; appearance: none;
+  color: #cfcfcf; background: #111; border: 1px solid #333; transition: .18s;
+}
+.svc-chip:hover { border-color: var(--muted); color: #fff; transform: translateY(-1px); }
+/* `display:inline-flex` above would otherwise beat the UA [hidden] rule. */
+.svc-chip[hidden] { display: none; }
+.svc-chip-dot { width: 7px; height: 7px; border-radius: 50%; background: #555; flex-shrink: 0; transition: .18s; }
+/* Active → gold */
+.svc-chip.on {
+  color: var(--accent); border-color: var(--accent);
+  background: var(--accent-faint); box-shadow: inset 0 0 0 1px rgba(234, 179, 8, .15);
+}
+.svc-chip.on .svc-chip-dot { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+.svc-chip.on:hover { color: #fde68a; border-color: #fde68a; }
+/* Data-transmit pulse: a gold ring radiates out + the dot flashes when this
+   service actually moves data (store / send / print / RIS / MWL event) — like a
+   link-activity LED, so the user can see traffic flowing. Fired from JS via the
+   `.tx` class, retriggered on each poll that saw activity. */
+.svc-chip.tx::after {
+  content: ""; position: absolute; inset: -1px; border-radius: 999px;
+  pointer-events: none; animation: chipTx .8s ease-out 2;
+}
+.svc-chip.tx .svc-chip-dot { animation: chipDotTx .45s ease-in-out 2; }
+@keyframes chipTx {
+  0%   { box-shadow: 0 0 0 0 rgba(234, 179, 8, .55); }
+  70%  { box-shadow: 0 0 0 6px rgba(234, 179, 8, 0); }
+  100% { box-shadow: 0 0 0 6px rgba(234, 179, 8, 0); }
+}
+@keyframes chipDotTx {
+  0%, 100% { background: var(--accent); box-shadow: 0 0 8px var(--accent); transform: scale(1); }
+  50%      { background: #fff; box-shadow: 0 0 12px #fde68a; transform: scale(1.5); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .svc-chip.tx::after, .svc-chip.tx .svc-chip-dot { animation: none; }
+}
+/* Tight screens: drop the labels to dots, then hide the row entirely. */
+@media (max-width: 1180px) { .svc-chip-label { display: none; } .svc-chip { padding: 6px; } }
+@media (max-width: 720px)  { .svc-nav { display: none; } }
+
 /* ── Sidebar shell: left nav + right content pane ───────────────── */
 .shell { display: flex; gap: 14px; flex: 1 1 auto; min-height: 0; }
 .sidebar { flex: 0 0 190px; display: flex; flex-direction: column; gap: 8px;
@@ -360,6 +412,9 @@ legend { color: var(--accent); font-family: var(--mono); font-size: .72rem; text
 .order-form input { background: #0f0f0f; border: 1px solid var(--border); border-radius: 6px;
   padding: 7px 9px; color: var(--text); font-size: .82rem; font-family: inherit; }
 .order-form input:focus { outline: none; border-color: var(--accent); }
+/* Render the native date/time pickers (calendar glyph + popup) dark, so they
+   match the panel instead of a dark-on-dark, invisible calendar icon. */
+.order-form input[type="date"], .order-form input[type="datetime-local"] { color-scheme: dark; }
 .order-form-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 14px 14px; }
 .order-form-foot .hint { margin: 0; max-width: 52ch; }
 @media (max-width: 620px) { .order-form { grid-template-columns: 1fr; } }

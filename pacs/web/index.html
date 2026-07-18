@@ -157,7 +157,7 @@
               <label>Accession # <input id="ordAcc" placeholder="the value the tech types into the modality" /></label>
               <label>Patient name <input id="ordPatient" placeholder="e.g. Jane Doe" /></label>
               <label>Patient ID <input id="ordPid" /></label>
-              <label>Date of birth <input id="ordDob" placeholder="YYYY-MM-DD" /></label>
+              <label>Date of birth <input id="ordDob" type="date" title="Patient date of birth" /></label>
               <label>Sex
                 <select id="ordSex">
                   <option value=""></option>
@@ -169,7 +169,7 @@
               <label>Modality <input id="ordMod" placeholder="US / CT / MR…" maxlength="16" /></label>
               <label>Target modality AE <input id="ordStation" placeholder="Scheduled Station AE (worklist filter)" maxlength="16" /></label>
               <label class="wide">Study description <input id="ordDesc" placeholder="e.g. Ultrasound Abdomen" /></label>
-              <label>Scheduled <input id="ordWhen" placeholder="YYYY-MM-DD HH:MM" /></label>
+              <label>Scheduled <input id="ordWhen" type="datetime-local" title="Scheduled exam date &amp; time" /></label>
               <label>Referring <input id="ordRef" placeholder="ordering physician" /></label>
             </div>
             <div class="order-form-foot">

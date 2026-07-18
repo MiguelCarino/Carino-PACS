@@ -24,6 +24,7 @@
   /* ── Status polling ──────────────────────────────────────────── */
   function renderStatus(s) {
     const rx = s.receiver, wx = s.watcher, px = s.printer || {}, rs = s.ris || {}, mw = s.mwl || {};
+    mountServiceChips();      // self-heals if the navbar mounted after us
 
     // This machine's network identity (what remote nodes send to).
     const ni = $("netInfo");
@@ -91,6 +92,7 @@
     $("rxErr").textContent = rx.errors;
     $("rxTls").textContent = rx.tls ? (rx.tls_mutual ? "TLS (mutual)" : "TLS") : "plaintext";
     setToggle($("rxToggle"), rx.running);
+    setChip("rx", rx.running);
 
     setDot($("wxDot"), wx.running);
     $("wxDir").textContent = wx.watch_dir;
@@ -100,6 +102,7 @@
     $("wxFailed").textContent = wx.failed;
     $("wxLast").textContent = wx.last_activity || "—";
     setToggle($("wxToggle"), wx.running);
+    setChip("wx", wx.running);
 
     setDot($("pxDot"), px.running);
     $("pxAet").textContent = px.aet || "—";
@@ -110,6 +113,7 @@
     $("pxErr").textContent = px.errors || 0;
     $("pxTls").textContent = px.tls ? "TLS" : "plaintext";
     setToggle($("pxToggle"), px.running);
+    setChip("px", px.running);
 
     setDot($("rsDot"), rs.running);
     $("rsAddr").textContent = `${rs.bind || "0.0.0.0"}:${rs.port || "—"}`;
@@ -118,6 +122,7 @@
     $("rsRecv").textContent = rs.received || 0;
     $("rsErr").textContent = rs.errors || 0;
     setToggle($("rsToggle"), rs.running);
+    setChip("rs", rs.running);
 
     setDot($("mwDot"), mw.running);
     $("mwAet").textContent = mw.aet || "—";
@@ -126,6 +131,7 @@
     $("mwMatches").textContent = mw.matches || 0;
     $("mwTls").textContent = mw.tls ? "TLS" : "plaintext";
     setToggle($("mwToggle"), mw.running);
+    setChip("mw", mw.running);
 
     renderEmergency(s.emergency || {}, rs, mw);
   }
@@ -139,6 +145,9 @@
     if (rsCard) rsCard.hidden = !((rs && rs.running) || emg.armed);
     // Worklist card shows when running, armed, or a no_ris destination makes it permanent.
     if (mwCard) mwCard.hidden = !((mw && (mw.running || mw.wanted)) || emg.armed);
+    // Keep the navbar chips for these advanced services in step with their cards.
+    showChip("rs", !(rsCard && rsCard.hidden));
+    showChip("mw", !(mwCard && mwCard.hidden));
 
     const banner = $("emgBanner");
     const state = emg.state || "off";
@@ -203,6 +212,54 @@
     el.classList.toggle("on", on);
     el.classList.toggle("off", !on);
   }
+
+  /* ── Service chips in the top navbar ─────────────────────────────
+     Each service is mirrored as a chip in the navbar: gold when running,
+     black-and-white when stopped. Clicking a chip just re-fires the matching
+     card toggle button, so the "start on launch" flag + config-persist logic
+     lives in exactly one place and card ⇄ navbar stay in lock-step. */
+  const NAV_SERVICES = [
+    { key: "rx", label: "Receiver",  toggle: "rxToggle" },
+    { key: "wx", label: "Auto-send", toggle: "wxToggle" },
+    { key: "px", label: "Printer",   toggle: "pxToggle" },
+    { key: "rs", label: "RIS",       toggle: "rsToggle" },
+    { key: "mw", label: "Worklist",  toggle: "mwToggle" },
+  ];
+  function mountServiceChips() {
+    const nav = document.getElementById("carinoNav");
+    if (!nav) return false;                       // navbar not injected yet
+    if (document.getElementById("svcNav")) return true;   // already mounted
+    const right = nav.querySelector(".cn-right");
+    if (!right) return false;
+    const box = document.createElement("div");
+    box.className = "svc-nav";
+    box.id = "svcNav";
+    NAV_SERVICES.forEach((svc) => {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "svc-chip";
+      chip.id = "nav_" + svc.key;
+      chip.dataset.on = "false";
+      chip.title = svc.label + " — click to start/stop";
+      const dot = document.createElement("span"); dot.className = "svc-chip-dot";
+      const lab = document.createElement("span"); lab.className = "svc-chip-label"; lab.textContent = svc.label;
+      chip.append(dot, lab);
+      chip.addEventListener("click", () => { const b = $(svc.toggle); if (b) b.click(); });
+      box.appendChild(chip);
+    });
+    right.insertBefore(box, right.firstChild);
+    return true;
+  }
+  function setChip(key, on) {
+    const chip = document.getElementById("nav_" + key);
+    if (!chip) return;
+    chip.dataset.on = String(!!on);
+    chip.classList.toggle("on", !!on);
+  }
+  function showChip(key, show) {
+    const chip = document.getElementById("nav_" + key);
+    if (chip) chip.hidden = !show;
+  }
   // Amber activity blink (like an ethernet link/activity LED); only while running.
   function blink(el) {
     if (!el || !el.classList.contains("on")) return;
@@ -210,9 +267,37 @@
     void el.offsetWidth;              // restart the CSS animation
     el.classList.add("act");
   }
+  // Fire the navbar chip's transmit pulse (gold ring + dot flash) for a service
+  // that just moved data. Only while running; restart trick lets it retrigger
+  // on every poll that saw traffic, so sustained transfers pulse continuously.
+  function pulseChip(key) {
+    const chip = document.getElementById("nav_" + key);
+    if (!chip || !chip.classList.contains("on")) return;
+    chip.classList.remove("tx");
+    void chip.offsetWidth;
+    chip.classList.add("tx");
+  }
   async function pollStatus() {
     try { renderStatus(await api("/api/status")); } catch (e) { /* keep last */ }
   }
+
+  /* ── Log timestamps ──────────────────────────────────────────────
+     Rendered through the shared navbar clock so toggling it (Local / UTC /
+     Epoch / TAI / .beats) re-expresses every log line at once. `ms` is the
+     epoch-millis of the entry; `isoFallback` is used only if the clock module
+     isn't loaded (offline edge). */
+  function fmtLogTs(ms, isoFallback) {
+    if (window.CarinoClock && typeof window.CarinoClock.format === "function" && !isNaN(ms)) {
+      return window.CarinoClock.format(ms);
+    }
+    return String(isoFallback || "").replace("T", " ").replace(/(\+00:00|Z)$/, "");
+  }
+  // Re-render already-drawn log lines when the clock mode changes.
+  document.addEventListener("carino-clock-change", () => {
+    document.querySelectorAll("#log .t[data-ms]").forEach((t) => {
+      t.textContent = fmtLogTs(Number(t.dataset.ms));
+    });
+  });
 
   /* ── Log polling ─────────────────────────────────────────────── */
   let logSeq = 0, firstLog = true;
@@ -233,7 +318,11 @@
         line.className = "line";
         const t = document.createElement("span");
         t.className = "t";
-        t.textContent = (e.ts || "").replace("T", " ").replace(/(\+00:00|Z)$/, "");
+        // Keep the raw instant on the node so a clock-mode toggle can re-express
+        // every line (Local / UTC / Epoch / TAI / .beats) without re-polling.
+        const ms = e.epoch ? e.epoch * 1000 : Date.parse(e.ts || "");
+        if (!isNaN(ms)) t.dataset.ms = ms;
+        t.textContent = fmtLogTs(ms, e.ts);
         const m = document.createElement("span");
         m.className = e.level;
         m.textContent = e.message;
@@ -243,11 +332,11 @@
       while (box.childElementCount > 400) box.removeChild(box.firstChild);
       if (atBottom) box.scrollTop = box.scrollHeight;
       if (!firstLog) {                 // don't blink for the backlog on first load
-        if (sawStore) blink($("rxDot"));
-        if (sawSend) blink($("wxDot"));
-        if (sawPrint) blink($("pxDot"));
-        if (sawRis) blink($("rsDot"));
-        if (sawMwl) blink($("mwDot"));
+        if (sawStore) { blink($("rxDot")); pulseChip("rx"); }
+        if (sawSend) { blink($("wxDot")); pulseChip("wx"); }
+        if (sawPrint) { blink($("pxDot")); pulseChip("px"); }
+        if (sawRis) { blink($("rsDot")); pulseChip("rs"); }
+        if (sawMwl) { blink($("mwDot")); pulseChip("mw"); }
       }
       firstLog = false;
     } catch (e) { /* ignore */ }
@@ -874,7 +963,7 @@
         o.modality || "",
         o.station_aet ? "→ " + o.station_aet : "",
         o.study_desc || "(no study description)",
-        o.scheduled_dt ? "@ " + o.scheduled_dt : "",
+        o.scheduled_dt ? "@ " + String(o.scheduled_dt).replace("T", " ") : "",
       ].filter(Boolean).join("  ·  ");
       const sub = row.querySelector(".order-sub");
       const bits = ["via " + (o.source || "?"), "queued " + fmtStamp(o.created)];
@@ -1001,6 +1090,7 @@
 
   /* ── Wire up ─────────────────────────────────────────────────── */
   document.addEventListener("DOMContentLoaded", () => {
+    mountServiceChips();      // navbar has self-injected by now (renderStatus re-tries if not)
     $("killSvc").addEventListener("click", killService);
     $("rxToggle").addEventListener("click", (e) => toggle("receiver", e.target));
     $("wxToggle").addEventListener("click", (e) => toggle("watcher", e.target));

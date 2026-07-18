@@ -85,28 +85,49 @@
     return '@' + String(Math.floor(ms / 86400) % 1000).padStart(3, '0');
   }
 
-  function tick() {
-    var d = new Date();
-    var time, tz;
-    if (clockMode === 1) {
+  // Format a Date under the CURRENT clock mode. Returns {date,time,tz}; `date`
+  // is '' for epoch (the seconds already carry the full instant). The whole UI
+  // (nav clock + log timestamps + anything else) renders through this so a
+  // single click on the clock re-expresses every registered time at once.
+  function fmt(d) {
+    var date = '', time, tz;
+    if (clockMode === 1) {            // UTC
       time = pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes()) + ':' + pad(d.getUTCSeconds());
+      date = d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate());
       tz = 'UTC';
-    } else if (clockMode === 2) {
+    } else if (clockMode === 2) {     // epoch seconds
       time = String(Math.floor(d.getTime() / 1000));
       tz = 'EPOCH';
-    } else if (clockMode === 3) {
+    } else if (clockMode === 3) {     // TAI (UTC + leap seconds)
       var t = new Date(d.getTime() + TAI_OFFSET * 1000);
       time = pad(t.getUTCHours()) + ':' + pad(t.getUTCMinutes()) + ':' + pad(t.getUTCSeconds());
+      date = t.getUTCFullYear() + '-' + pad(t.getUTCMonth() + 1) + '-' + pad(t.getUTCDate());
       tz = 'TAI';
-    } else if (clockMode === 4) {
+    } else if (clockMode === 4) {     // Swatch .beats
       time = beats(d);
+      date = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
       tz = 'BEATS';
-    } else {
+    } else {                          // local
       time = pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+      date = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
       tz = localTz;
     }
-    set('cnClock', time);
-    set('cnTz', tz);
+    return { date: date, time: time, tz: tz };
+  }
+
+  // Coerce a Date | epoch-seconds number | ISO string into a Date (null if unparseable).
+  function toDate(input) {
+    if (input instanceof Date) return input;
+    if (typeof input === 'number') return new Date(input < 1e12 ? input * 1000 : input);
+    if (typeof input === 'string' && input) { var d = new Date(input); return isNaN(d.getTime()) ? null : d; }
+    return null;
+  }
+
+  function tick() {
+    var d = new Date();
+    var f = fmt(d);
+    set('cnClock', f.time);
+    set('cnTz', f.tz);
     var h = d.getHours();
     set('cnGreeting', h < 5 ? 'Late shift.' : h < 12 ? 'Good morning.' : h < 18 ? 'Good afternoon.' : 'Good evening.');
   }
@@ -114,10 +135,30 @@
   function wireClock() {
     var wrap = document.getElementById('cnClockWrap');
     if (!wrap) return;
-    function cycle() { clockMode = (clockMode + 1) % CLOCK_MODES; tick(); }
+    function cycle() {
+      clockMode = (clockMode + 1) % CLOCK_MODES;
+      tick();
+      // Let the rest of the page (e.g. the log timestamps) re-render in the new mode.
+      try { document.dispatchEvent(new CustomEvent('carino-clock-change', { detail: { mode: clockMode } })); } catch (e) {}
+    }
     wrap.addEventListener('click', cycle);
     wrap.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); cycle(); } });
   }
+
+  // Shared clock, so any script can render a timestamp in whatever mode the
+  // navbar clock is currently showing, and re-render on 'carino-clock-change'.
+  window.CarinoClock = {
+    get mode() { return clockMode; },
+    // Format any timestamp under the current mode → {date,time,tz}.
+    parts: function (input) { var d = toDate(input); return d ? fmt(d) : { date: '', time: '', tz: '' }; },
+    // Convenience: a single display string ("YYYY-MM-DD HH:MM:SS", or the bare
+    // epoch/.beats token for those modes).
+    format: function (input) {
+      var p = this.parts(input);
+      if (!p.time) return '';
+      return p.date ? (p.date + ' ' + p.time) : p.time;
+    }
+  };
 
   // Move an app's own header controls INTO the navbar's right cluster so there
   // is a single top bar. The real DOM nodes are moved (not cloned), so their

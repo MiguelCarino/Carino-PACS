@@ -1,0 +1,31 @@
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# PyInstaller / packaging output
+/build/
+/dist/
+
+# Electron / Node
+desktop/node_modules/
+desktop/dist/
+desktop/out/
+
+# Claude Code local tooling (worktrees, session state)
+.claude/
+
+# Local runtime data (received/forwarded studies, logs)
+/received/
+/outgoing/
+/sent/
+/logs/
+
+# OS cruft
+.DS_Store
+Thumbs.db
