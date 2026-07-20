@@ -268,8 +268,28 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
   `127.0.0.1`. Keep it on localhost (or behind your own VPN/reverse proxy) — do
   not expose it to untrusted networks. `allowed_aets` gives you basic
   calling-AE filtering on the receiver, but DICOM itself is unauthenticated.
-- Scope is deliberately **store + forward only** (no C-FIND / C-MOVE / MWL).
+- Query/retrieve is deliberately **out of scope** (no C-FIND *storage* query /
+  C-MOVE). The worklist C-FIND (MWL) serves *orders*, not stored images — Carino
+  stores, forwards, and reconciles; it is not a Q/R archive.
 
 ---
+
+## License
+
+**GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later)** — see
+[LICENSE](LICENSE). Copyright © 2026 Miguel Carino.
+
+Because Carino PACS is a **network server**, AGPL §13 applies: if you run a
+modified version as a service, you must offer its users the modified source.
+Bundled dependencies ([`pynetdicom`](https://github.com/pydicom/pynetdicom),
+[`pydicom`](https://github.com/pydicom/pydicom), `dcmjs`) keep their own
+permissive licenses.
+
+> Planned relicense: the AGPL protection is intended for the pre-1.0 → 1.x
+> development window. A future **2.0.0** may relicense to MPL-2.0 for wider
+> clinical adoption. Contributions are accepted on the understanding that they
+> may be included in that relicense.
+
+See [CHANGELOG.md](CHANGELOG.md) for what has changed since the upstream 1.0.0.
 
 Part of the [carino.systems](https://carino.systems/) workshop.

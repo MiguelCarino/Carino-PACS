@@ -1,11 +1,11 @@
 {
   "name": "carino-pacs-desktop",
   "productName": "Carino PACS",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Tray agent + desktop window for the Carino PACS DICOM store server",
-  "author": { "name": "Carino Systems", "email": "hello@carino.systems" },
+  "author": { "name": "Miguel Carino", "email": "hello@carino.systems" },
   "homepage": "https://github.com/MiguelCarino/Carino-PACS",
-  "license": "MIT",
+  "license": "AGPL-3.0-or-later",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
